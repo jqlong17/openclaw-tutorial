@@ -116,6 +116,7 @@ export default defineConfig({
     
     socialLinks: [
       { icon: 'github', link: 'https://github.com/openclaw/openclaw' },
+      { icon: 'discord', link: 'https://discord.gg/HpY684EF', ariaLabel: '加入 Discord 服务器' },
     ],
     
     outline: {
