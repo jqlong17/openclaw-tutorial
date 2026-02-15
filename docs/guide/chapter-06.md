@@ -1,1074 +1,504 @@
 # 第 6 章：通道抽象层
 
-> 本章将深入解析 OpenClaw 的通道抽象层设计，了解如何统一不同消息平台的差异。
+> 本章将讲解 OpenClaw 如何统一接入不同的消息平台，让你理解平台适配器的设计原理。
 
 ---
 
-## 6.1 Channel 设计哲学
+## 6.1 平台接入的挑战
 
-### 6.1.1 为什么需要抽象层
+### 6.1.1 各平台的差异
 
-在没有抽象层的情况下，每个平台都需要独立处理：
+不同消息平台的差异有多大？
 
-```
-❌ 没有抽象层
+| 方面 | Discord | Telegram | 飞书 |
+|------|---------|----------|------|
+| **协议** | WebSocket | HTTP 长轮询 / Webhook | Webhook |
+| **认证** | Bot Token | Bot Token | App ID + Secret |
+| **消息格式** | JSON | JSON | JSON（结构不同） |
+| **富媒体** | 支持 | 支持 | 支持（卡片） |
+| **群组管理** | 服务器+频道 | 群组+话题 | 群+线程 |
+| **API 限制** | 120/分钟 | 30/秒 | 100/分钟 |
 
-Discord Bot          Telegram Bot         Slack Bot
-     │                     │                    │
-     ▼                     ▼                    ▼
-  Discord API        Telegram API          Slack API
-     │                     │                    │
-     ▼                     ▼                    ▼
-  独立处理逻辑        独立处理逻辑          独立处理逻辑
-     │                     │                    │
-     ▼                     ▼                    ▼
-  重复代码            重复代码              重复代码
-```
-
-有了抽象层后：
+**如果没有抽象层**：
 
 ```
-✅ 有抽象层
+你的业务逻辑
+    ↓
+需要同时处理：
+- Discord 的 WebSocket 连接
+- Telegram 的 HTTP 轮询
+- 飞书的 Webhook 验证
+- 每个平台的特殊消息格式
+- 各自的限流策略
 
-Discord ──┐
-          │
-Telegram ─┼──▶ Channel Adapter ──▶ 统一处理逻辑 ──▶ AI Core
-          │         (标准化)
-Slack ────┘
+结果：代码混乱，难以维护
 ```
 
-**抽象层的价值**：
+### 6.1.2 抽象层的价值
+
+通道抽象层（Channel Abstraction Layer）解决这些问题：
+
+```
+┌─────────────────────────────────────────┐
+│           你的业务逻辑                   │
+│      （只处理统一的消息格式）              │
+└─────────────────┬───────────────────────┘
+                  │ 统一接口
+┌─────────────────▼───────────────────────┐
+│         通道抽象层（Channel Layer）      │
+│    屏蔽平台差异，提供统一接入能力          │
+└─────────────────┬───────────────────────┘
+                  │ 平台特定实现
+┌─────────────────▼───────────────────────┐
+│  Discord  │  Telegram  │    飞书       │
+│  Adapter  │  Adapter   │   Adapter    │
+└─────────────────────────────────────────┘
+```
+
+**核心价值**：
 
 | 价值 | 说明 |
 |------|------|
-| **代码复用** | 核心逻辑只需写一次 |
-| **易于扩展** | 添加新平台只需实现适配器 |
-| **统一维护** | 修复 bug 只需改一处 |
-| **降低门槛** | 新开发者只需了解抽象接口 |
+| **一次开发** | 业务逻辑写一次，支持所有平台 |
+| **易于扩展** | 新增平台只需添加适配器 |
+| **降低复杂度** | 不用关心平台细节 |
+| **统一维护** | 平台变更只需改适配器 |
 
-### 6.1.2 Channel 接口定义
+---
 
-OpenClaw 的 Channel 核心接口：
+## 6.2 抽象层设计
+
+### 6.2.1 统一消息格式
+
+所有平台的消息都转换为标准格式：
 
 ```typescript
-// /src/channels/registry.ts (简化)
-
-/**
- * 通道接口 - 所有平台适配器必须实现
- */
-interface Channel {
-  /** 通道唯一标识 */
-  readonly id: string;
-  
-  /** 通道类型 */
-  readonly type: 'discord' | 'telegram' | 'slack' | ...;
-  
-  /**
-   * 初始化通道
-   * 建立连接、认证、启动监听
-   */
-  initialize(): Promise<void>;
-  
-  /**
-   * 销毁通道
-   * 清理资源、关闭连接
-   */
-  destroy(): Promise<void>;
-  
-  /**
-   * 发送消息
-   */
-  sendMessage(
-    target: MessageTarget,
-    content: MessageContent,
-    options?: SendOptions
-  ): Promise<SentMessage>;
-  
-  /**
-   * 注册消息处理器
-   */
-  onMessage(handler: MessageHandler): void;
-  
-  /**
-   * 发送"正在输入"状态
-   */
-  sendTyping(target: MessageTarget): Promise<void>;
-  
-  /**
-   * 获取通道状态
-   */
-  getStatus(): ChannelStatus;
-}
-
-/**
- * 消息目标
- */
-interface MessageTarget {
-  /** 目标类型 */
-  type: 'user' | 'channel' | 'thread';
-  
-  /** 目标 ID */
+// 标准消息结构
+interface StandardMessage {
+  // 消息唯一标识
   id: string;
   
-  /** 父级 ID（如频道 ID） */
-  parentId?: string;
-}
-
-/**
- * 消息内容
- */
-interface MessageContent {
-  /** 文本内容 */
-  text?: string;
+  // 来源平台
+  platform: 'discord' | 'telegram' | 'lark' | ...;
   
-  /** 媒体附件 */
-  attachments?: Attachment[];
-  
-  /** 回复引用 */
-  replyTo?: string;
-  
-  /** 平台特定扩展 */
-  platformSpecific?: Record<string, unknown>;
-}
-
-/**
- * 消息处理器
- */
-type MessageHandler = (message: InboundMessage) => Promise<void> | void;
-
-/**
- * 入站消息
- */
-interface InboundMessage {
-  /** 消息 ID */
-  id: string;
-  
-  /** 内容 */
-  content: string;
-  
-  /** 发送者 */
+  // 发送者信息
   sender: {
     id: string;
     name: string;
-    username?: string;
+    avatar?: string;
   };
   
-  /** 目标 */
-  target: MessageTarget;
+  // 消息内容
+  content: {
+    type: 'text' | 'image' | 'file' | 'card';
+    text?: string;
+    attachments?: Attachment[];
+  };
   
-  /** 平台原始数据 */
-  raw: unknown;
+  // 会话上下文
+  context: {
+    channelId: string;
+    threadId?: string;
+    isGroup: boolean;
+  };
   
-  /** 时间戳 */
-  timestamp: Date;
+  // 时间戳
+  timestamp: number;
 }
 ```
 
-### 6.1.3 适配器模式
+> **源码参考**：消息类型定义 `src/types/message.ts`
 
-OpenClaw 使用适配器模式统一不同平台：
+### 6.2.2 适配器接口
 
-```mermaid
-graph TB
-    subgraph 抽象层
-        A[Channel Interface]
-    end
-    
-    subgraph 适配器层
-        B1[DiscordAdapter]
-        B2[TelegramAdapter]
-        B3[SlackAdapter]
-        B4[OtherAdapter]
-    end
-    
-    subgraph 平台 SDK
-        C1[discord.js]
-        C2[grammy]
-        C3[@slack/bolt]
-        C4[...]
-    end
-    
-    subgraph 平台 API
-        D1[Discord API]
-        D2[Telegram API]
-        D3[Slack API]
-        D4[...]
-    end
-    
-    A --> B1
-    A --> B2
-    A --> B3
-    A --> B4
-    
-    B1 --> C1
-    B2 --> C2
-    B3 --> C3
-    B4 --> C4
-    
-    C1 --> D1
-    C2 --> D2
-    C3 --> D3
-    C4 --> D4
+每个平台适配器实现统一接口：
+
+```typescript
+// 适配器接口定义
+interface ChannelAdapter {
+  // 平台名称
+  readonly platform: string;
+  
+  // 初始化连接
+  initialize(config: AdapterConfig): Promise<void>;
+  
+  // 接收消息（平台 → OpenClaw）
+  onMessage(handler: (msg: StandardMessage) => void): void;
+  
+  // 发送消息（OpenClaw → 平台）
+  sendMessage(channelId: string, content: MessageContent): Promise<void>;
+  
+  // 关闭连接
+  disconnect(): Promise<void>;
+}
 ```
 
-**适配器职责**：
+**适配器实现示例**：
 
-| 职责 | 说明 |
-|------|------|
-| **协议转换** | 平台 API ↔ 内部接口 |
-| **数据标准化** | 平台格式 ↔ 统一格式 |
-| **特性适配** | 处理平台特有功能 |
-| **错误处理** | 平台特定错误转换 |
+```typescript
+// Discord 适配器
+class DiscordAdapter implements ChannelAdapter {
+  readonly platform = 'discord';
+  private client: DiscordClient;
+  
+  async initialize(config) {
+    // 连接 Discord WebSocket
+    this.client = new DiscordClient(config.token);
+    await this.client.connect();
+  }
+  
+  onMessage(handler) {
+    // 监听 Discord 消息事件
+    this.client.on('message', (discordMsg) => {
+      // 转换为标准格式
+      const standardMsg = this.toStandard(discordMsg);
+      handler(standardMsg);
+    });
+  }
+  
+  async sendMessage(channelId, content) {
+    // 转换为 Discord 格式并发送
+    const discordContent = this.fromStandard(content);
+    await this.client.send(channelId, discordContent);
+  }
+}
+```
+
+> **源码参考**：适配器接口 `src/channels/adapter-interface.ts`，Discord 适配器 `src/discord/adapter.ts`
+
+### 6.2.3 平台特性映射
+
+不同平台的相似功能如何映射？
+
+| 功能 | Discord | Telegram | 飞书 |
+|------|---------|----------|------|
+| **单聊** | DM（私信） | Private Chat | 单聊 |
+| **群聊** | Server + Channel | Group + Topic | 群 + 线程 |
+| **@提及** | @username | @username | @用户名 |
+| **回复** | Reply | Reply | 回复 |
+| **表情回应** | Reaction | Reaction | 表情回复 |
+| **富文本** | Embed | Markdown + 按钮 | 卡片消息 |
+
+**映射示例**：
+
+```
+OpenClaw 标准格式          Discord          Telegram         飞书
+─────────────────────────────────────────────────────────────────
+replyTo: messageId    →  message_reference  reply_to_message  parent_id
+mentions: [...]       →  mentions           entities          at_users
+attachments: [...]    →  attachments        document          files
+card: {...}           →  embed              inline_keyboard   card
+```
 
 ---
 
-## 6.2 消息标准化
+## 6.3 适配器实现原理
 
-### 6.2.1 MsgContext 结构
+### 6.3.1 Discord 适配器
 
-标准化的消息上下文结构：
+**连接方式**：WebSocket
 
-```typescript
-// /src/auto-reply/templating.ts
-
-interface MsgContext {
-  // ========== 消息内容 ==========
-  
-  /** 完整消息体（含信封格式） */
-  Body: string;
-  
-  /** 给 AI 的纯净内容 */
-  BodyForAgent: string;
-  
-  /** 原始消息内容 */
-  RawBody: string;
-  
-  /** 命令部分（如果有） */
-  CommandBody?: string;
-  
-  // ========== 路由信息 ==========
-  
-  /** 发送者标识 */
-  From: string;
-  
-  /** 接收者标识 */
-  To: string;
-  
-  /** 会话唯一键 */
-  SessionKey: string;
-  
-  /** 账号 ID */
-  AccountId: string;
-  
-  // ========== 会话信息 ==========
-  
-  /** 聊天类型 */
-  ChatType: 'direct' | 'channel';
-  
-  /** 会话标签 */
-  ConversationLabel: string;
-  
-  // ========== 群组信息 ==========
-  
-  /** 群组主题 */
-  GroupSubject?: string;
-  
-  /** 群组频道 */
-  GroupChannel?: string;
-  
-  /** 群组空间 */
-  GroupSpace?: string;
-  
-  // ========== 发送者信息 ==========
-  
-  /** 发送者名称 */
-  SenderName: string;
-  
-  /** 发送者 ID */
-  SenderId: string;
-  
-  /** 用户名 */
-  SenderUsername: string;
-  
-  /** 标签 */
-  SenderTag?: string;
-  
-  // ========== 回复上下文 ==========
-  
-  /** 回复的消息 ID */
-  ReplyToId?: string;
-  
-  /** 回复的消息内容 */
-  ReplyToBody?: string;
-  
-  /** 回复的消息发送者 */
-  ReplyToSender?: string;
-  
-  // ========== 线程信息 ==========
-  
-  /** 线程起始消息 */
-  ThreadStarterBody?: string;
-  
-  /** 线程标签 */
-  ThreadLabel?: string;
-  
-  /** 父会话键 */
-  ParentSessionKey?: string;
-  
-  // ========== 媒体 ==========
-  
-  /** 媒体 URL */
-  MediaUrl?: string;
-  
-  /** 媒体类型 */
-  MediaContentType?: string;
-  
-  /** 媒体说明 */
-  MediaCaption?: string;
-  
-  // ========== 元数据 ==========
-  
-  /** 提供商 */
-  Provider: string;
-  
-  /** 表面 */
-  Surface: string;
-  
-  /** 是否被@提及 */
-  WasMentioned: boolean;
-  
-  /** 时间戳 */
-  Timestamp: number;
-  
-  // ========== 命令相关 ==========
-  
-  /** 命令是否授权 */
-  CommandAuthorized?: boolean;
-  
-  /** 命令来源 */
-  CommandSource?: 'text' | 'native';
-  
-  // ========== 其他 ==========
-  
-  /** 不可信上下文 */
-  UntrustedContext?: unknown[];
-  
-  /** 群组系统提示词 */
-  GroupSystemPrompt?: string;
-  
-  /** 允许的发送者 */
-  OwnerAllowFrom?: string[];
-}
+```
+Discord 服务器 ←──WebSocket──→ Discord Adapter
+                                    ↓
+                              转换为标准消息
+                                    ↓
+                              发送给 Gateway
 ```
 
-### 6.2.2 平台特定字段映射
+**特点**：
+- 实时双向通信
+- 支持消息编辑、删除事件
+- 支持表情回应、线程管理
 
-不同平台到标准字段的映射：
-
-| 标准字段 | Discord | Telegram | Slack |
-|----------|---------|----------|-------|
-| `SenderId` | `author.id` | `from.id` | `user.id` |
-| `SenderName` | `author.global_name` | `from.first_name` | `user.real_name` |
-| `SenderUsername` | `author.username` | `from.username` | `user.name` |
-| `To` | `channel_id` | `chat.id` | `channel` |
-| `ChatType` | `guild_id ? 'channel' : 'direct'` | `chat.type` | `channel_type` |
-| `ReplyToId` | `referenced_message.id` | `reply_to_message.message_id` | `thread_ts` |
-
-**Discord 转换示例**：
+**消息转换示例**：
 
 ```typescript
-// /src/discord/monitor/message-handler.process.ts (简化)
-function discordToStandard(
-  message: DiscordMessage,
-  context: DiscordContext
-): Partial<MsgContext> {
-  const isDM = !message.guild_id;
-  
+// Discord 消息 → 标准消息
+function toStandard(discordMsg): StandardMessage {
   return {
-    // 内容
-    RawBody: message.content,
-    BodyForAgent: message.content,
-    
-    // 发送者
-    SenderId: message.author.id,
-    SenderName: message.author.global_name || message.author.username,
-    SenderUsername: message.author.username,
-    
-    // 目标
-    From: isDM 
-      ? `discord:user:${message.author.id}`
-      : `discord:channel:${message.channel_id}`,
-    To: isDM
-      ? `discord:user:${message.author.id}`
-      : `discord:channel:${message.channel_id}`,
-    
-    // 会话类型
-    ChatType: isDM ? 'direct' : 'channel',
-    
-    // 回复
-    ReplyToId: message.referenced_message?.id,
-    
-    // 平台
-    Provider: 'discord',
-    Surface: 'discord',
-    
-    // 提及
-    WasMentioned: message.mentions.some(
-      m => m.id === context.botUserId
-    ),
-    
-    // 时间戳
-    Timestamp: new Date(message.timestamp).getTime(),
+    id: discordMsg.id,
+    platform: 'discord',
+    sender: {
+      id: discordMsg.author.id,
+      name: discordMsg.author.username,
+      avatar: discordMsg.author.avatarURL(),
+    },
+    content: {
+      type: 'text',
+      text: discordMsg.content,
+      attachments: discordMsg.attachments.map(a => ({
+        name: a.name,
+        url: a.url,
+        type: a.contentType,
+      })),
+    },
+    context: {
+      channelId: discordMsg.channelId,
+      threadId: discordMsg.thread?.id,
+      isGroup: discordMsg.guild !== null,
+    },
+    timestamp: discordMsg.createdTimestamp,
   };
 }
 ```
 
-### 6.2.3 媒体内容处理
+> **源码参考**：Discord 适配器 `src/discord/adapter.ts`
 
-不同平台的媒体处理方式：
+### 6.3.2 Telegram 适配器
+
+**连接方式**：HTTP 长轮询 或 Webhook
+
+```
+方式一：长轮询
+Telegram 服务器 ←──HTTP 轮询──→ Telegram Adapter
+（每 1-30 秒请求一次）
+
+方式二：Webhook
+Telegram 服务器 ──POST 请求──→ Telegram Adapter
+（实时推送）
+```
+
+**特点**：
+- 支持 Bot API 的所有功能
+- 支持内联键盘、回复键盘
+- 支持话题（Topic）管理
+
+**消息转换示例**：
 
 ```typescript
-// 媒体类型枚举
-enum MediaType {
-  IMAGE = 'image',
-  VIDEO = 'video',
-  AUDIO = 'audio',
-  DOCUMENT = 'document',
-  STICKER = 'sticker',
-}
-
-// 标准化媒体信息
-interface MediaInfo {
-  type: MediaType;
-  url: string;
-  mimeType: string;
-  size: number;
-  filename?: string;
-  caption?: string;
-}
-
-// Discord 媒体提取
-function extractDiscordMedia(message: DiscordMessage): MediaInfo[] {
-  return message.attachments.map(att => ({
-    type: guessMediaType(att.content_type),
-    url: att.url,
-    mimeType: att.content_type,
-    size: att.size,
-    filename: att.filename,
-  }));
-}
-
-// Telegram 媒体提取
-function extractTelegramMedia(message: TelegramMessage): MediaInfo[] {
-  const media: MediaInfo[] = [];
-  
-  if (message.photo) {
-    const largest = message.photo[message.photo.length - 1];
-    media.push({
-      type: MediaType.IMAGE,
-      url: `https://api.telegram.org/file/bot${token}/${largest.file_id}`,
-      mimeType: 'image/jpeg',
-      size: largest.file_size || 0,
-    });
-  }
-  
-  if (message.video) {
-    media.push({
-      type: MediaType.VIDEO,
-      url: message.video.file_id,
-      mimeType: message.video.mime_type || 'video/mp4',
-      size: message.video.file_size || 0,
-    });
-  }
-  
-  if (message.document) {
-    media.push({
-      type: MediaType.DOCUMENT,
-      url: message.document.file_id,
-      mimeType: message.document.mime_type || 'application/octet-stream',
-      size: message.document.file_size || 0,
-      filename: message.document.file_name,
-    });
-  }
-  
-  return media;
-}
-```
-
----
-
-## 6.3 白名单与权限
-
-### 6.3.1 Allow List 配置
-
-控制谁可以与 Agent 交互：
-
-```json
-{
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "accounts": {
-        "default": {
-          "token": "${DISCORD_BOT_TOKEN}",
-          "dm": {
-            "enabled": true,
-            "policy": "pairing",
-            "allowFrom": ["user_id_1", "user_id_2"]
-          },
-          "guilds": {
-            "my_guild_id": {
-              "channels": {
-                "general": {
-                  "users": ["*"]
-                },
-                "admin": {
-                  "users": ["admin_id_1", "admin_id_2"]
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**配置说明**：
-
-| 配置项 | 说明 | 示例值 |
-|--------|------|--------|
-| `dm.enabled` | 是否允许私信 | `true` / `false` |
-| `dm.policy` | 私信策略 | `"open"` / `"pairing"` / `"allowlist"` |
-| `dm.allowFrom` | 允许的用户列表 | `["123", "456"]` 或 `["*"]` |
-| `guilds.{id}` | 特定 Guild 配置 | Guild ID |
-| `channels.{name}.users` | 频道允许用户 | `["*"]` 表示所有人 |
-
-### 6.3.2 提及门控
-
-在群组中控制何时响应：
-
-```typescript
-// /src/channels/mention-gating.ts (简化)
-
-interface MentionGatingConfig {
-  /** 是否需要提及才响应 */
-  requireMention: boolean;
-  
-  /** 提及方式 */
-  mentionTypes: ('@bot' | '@everyone' | '@here' | 'keyword')[];
-  
-  /** 关键词列表（如果 mentionTypes 包含 keyword） */
-  keywords?: string[];
-  
-  /** 私聊是否免提及 */
-  dmBypass: boolean;
-  
-  /** 管理员是否免提及 */
-  adminBypass: boolean;
-}
-
-function shouldRespond(
-  message: InboundMessage,
-  config: MentionGatingConfig,
-  context: Context
-): boolean {
-  // 私聊免提及
-  if (config.dmBypass && message.chatType === 'direct') {
-    return true;
-  }
-  
-  // 不需要提及
-  if (!config.requireMention) {
-    return true;
-  }
-  
-  // 检查是否被@提及
-  if (message.wasMentioned) {
-    return true;
-  }
-  
-  // 检查关键词
-  if (config.keywords) {
-    for (const keyword of config.keywords) {
-      if (message.content.includes(keyword)) {
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
-```
-
-### 6.3.3 命令授权
-
-控制谁可以使用特定命令：
-
-```json
-{
-  "commands": {
-    "native": true,
-    "accessGroups": {
-      "admin": {
-        "users": ["user_id_1", "user_id_2"],
-        "commands": ["config", "restart", "shutdown"]
-      },
-      "moderator": {
-        "users": ["user_id_3"],
-        "commands": ["ban", "unban", "mute"]
-      }
-    }
-  }
-}
-```
-
-**命令授权检查**：
-
-```typescript
-// /src/channels/command-gating.ts (简化)
-
-function checkCommandAuthorization(
-  command: string,
-  userId: string,
-  config: CommandConfig
-): AuthorizationResult {
-  // 检查是否在允许列表
-  for (const [groupName, group] of Object.entries(config.accessGroups)) {
-    if (group.users.includes(userId) || group.users.includes('*')) {
-      if (group.commands.includes(command) || group.commands.includes('*')) {
-        return { authorized: true, group: groupName };
-      }
-    }
-  }
-  
-  // 检查默认权限
-  if (config.defaultAllow?.includes(command)) {
-    return { authorized: true, group: 'default' };
-  }
-  
-  return { 
-    authorized: false, 
-    reason: `Command "${command}" not allowed for user ${userId}` 
+// Telegram 消息 → 标准消息
+function toStandard(tgMsg): StandardMessage {
+  return {
+    id: String(tgMsg.message_id),
+    platform: 'telegram',
+    sender: {
+      id: String(tgMsg.from.id),
+      name: tgMsg.from.first_name,
+    },
+    content: {
+      type: 'text',
+      text: tgMsg.text || '',
+    },
+    context: {
+      channelId: String(tgMsg.chat.id),
+      threadId: tgMsg.message_thread_id,
+      isGroup: tgMsg.chat.type !== 'private',
+    },
+    timestamp: tgMsg.date * 1000, // Telegram 使用秒级时间戳
   };
 }
 ```
 
-### 6.3.4 群组策略
+> **源码参考**：Telegram 适配器 `src/telegram/adapter.ts`
 
-控制群组级别的行为：
+### 6.3.3 飞书适配器
 
-```json
-{
-  "channels": {
-    "discord": {
-      "groupPolicy": "open",
-      "accounts": {
-        "default": {
-          "guilds": {
-            "*": {
-              "requireMention": true,
-              "autoThread": false,
-              "historyLimit": 20
-            }
-          }
-        }
-      }
-    }
-  }
+**连接方式**：Webhook
+
+```
+飞书服务器 ──POST 请求──→ 飞书 Adapter
+                              ↓
+                        验证签名
+                              ↓
+                        转换为标准消息
+```
+
+**特点**：
+- 企业级功能丰富
+- 支持卡片消息、审批流程
+- 支持群机器人、应用机器人
+
+**安全验证**：
+
+```typescript
+// 飞书请求签名验证
+function verifySignature(body: string, signature: string, secret: string): boolean {
+  const timestamp = Date.now();
+  const signString = `${timestamp}\n${secret}`;
+  const computed = crypto.createHmac('sha256', secret)
+    .update(signString)
+    .digest('base64');
+  return signature === computed;
 }
 ```
 
-**群组策略选项**：
-
-| 策略 | 说明 |
-|------|------|
-| `"open"` | 开放模式，响应所有允许的消息 |
-| `"mention"` | 提及模式，只响应@提及的消息 |
-| `"command"` | 命令模式，只响应命令 |
-| `"disabled"` | 禁用，不响应任何消息 |
+> **源码参考**：飞书适配器 `src/lark/adapter.ts`
 
 ---
 
-## 6.4 实现一个简单 Channel
+## 6.4 添加新平台
 
-### 6.4.1 需求分析
+### 6.4.1 实现步骤
 
-假设我们要添加一个**飞书（Lark）**平台的支持：
+如果你想接入一个新的消息平台（如 Slack）：
 
-**飞书 Bot 特点**：
-- Webhook 接收消息
-- HTTP API 发送消息
-- 支持私聊和群聊
-- 支持富文本和卡片
-
-### 6.4.2 接口实现
-
-创建 `/src/lark/` 目录：
+**第一步：创建适配器文件**
 
 ```typescript
-// /src/lark/adapter.ts
+// src/slack/adapter.ts
 
-import { Channel, MessageTarget, MessageContent, InboundMessage } from '../channels/types';
+import { ChannelAdapter, StandardMessage } from '../channels/adapter-interface';
 
-export class LarkAdapter implements Channel {
-  readonly id = 'lark';
-  readonly type = 'lark';
+export class SlackAdapter implements ChannelAdapter {
+  readonly platform = 'slack';
   
-  private appId: string;
-  private appSecret: string;
-  private webhookSecret: string;
-  private messageHandlers: Array<(message: InboundMessage) => void> = [];
-  
-  constructor(config: LarkConfig) {
-    this.appId = config.appId;
-    this.appSecret = config.appSecret;
-    this.webhookSecret = config.webhookSecret;
+  async initialize(config: { token: string; signingSecret: string }) {
+    // 初始化 Slack SDK
   }
   
-  async initialize(): Promise<void> {
-    // 1. 获取 tenant access token
-    await this.refreshToken();
-    
-    // 2. 启动 webhook 服务器
-    this.startWebhookServer();
-    
-    // 3. 设置事件订阅
-    await this.subscribeEvents();
-    
-    console.log('Lark adapter initialized');
+  onMessage(handler: (msg: StandardMessage) => void) {
+    // 监听 Slack 事件
   }
   
-  async destroy(): Promise<void> {
-    // 清理资源
-    this.stopWebhookServer();
-    console.log('Lark adapter destroyed');
+  async sendMessage(channelId: string, content: any) {
+    // 发送消息到 Slack
   }
   
-  async sendMessage(
-    target: MessageTarget,
-    content: MessageContent,
-    options?: SendOptions
-  ): Promise<SentMessage> {
-    const larkMessage = this.toLarkFormat(content);
-    
-    const response = await fetch(
-      `https://open.feishu.cn/open-apis/im/v1/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          receive_id: target.id,
-          msg_type: larkMessage.msg_type,
-          content: JSON.stringify(larkMessage.content),
-        }),
-      }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Lark API error: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    return {
-      id: result.data.message_id,
-      timestamp: new Date(),
-    };
+  // 转换方法
+  private toStandard(slackEvent: any): StandardMessage {
+    // 实现转换逻辑
   }
   
-  onMessage(handler: (message: InboundMessage) => void): void {
-    this.messageHandlers.push(handler);
-  }
-  
-  async sendTyping(target: MessageTarget): Promise<void> {
-    // 飞书没有直接的"正在输入"API
-    // 可以发送一个空卡片或省略号
-  }
-  
-  getStatus(): ChannelStatus {
-    return {
-      connected: !!this.accessToken,
-      authenticated: !!this.accessToken,
-    };
-  }
-  
-  // ========== 私有方法 ==========
-  
-  private async refreshToken(): Promise<void> {
-    const response = await fetch(
-      'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          app_id: this.appId,
-          app_secret: this.appSecret,
-        }),
-      }
-    );
-    
-    const result = await response.json();
-    this.accessToken = result.tenant_access_token;
-    
-    // 设置定时刷新
-    setTimeout(() => this.refreshToken(), result.expire * 1000 - 60000);
-  }
-  
-  private startWebhookServer(): void {
-    // 创建 HTTP 服务器接收飞书事件
-    const server = createServer((req, res) => {
-      if (req.url === '/webhook/lark' && req.method === 'POST') {
-        this.handleWebhook(req, res);
-      }
-    });
-    
-    server.listen(3001);
-  }
-  
-  private async handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await readBody(req);
-    const event = JSON.parse(body);
-    
-    // 验证签名
-    if (!this.verifySignature(body, req.headers['x-lark-signature'] as string)) {
-      res.statusCode = 401;
-      res.end('Unauthorized');
-      return;
-    }
-    
-    // 处理 URL 验证
-    if (event.type === 'url_verification') {
-      res.end(JSON.stringify({ challenge: event.challenge }));
-      return;
-    }
-    
-    // 转换为标准消息
-    const message = this.toStandardMessage(event);
-    
-    // 通知处理器
-    for (const handler of this.messageHandlers) {
-      handler(message);
-    }
-    
-    res.end('OK');
-  }
-  
-  private toStandardMessage(event: LarkEvent): InboundMessage {
-    const message = event.event.message;
-    const sender = event.event.sender;
-    
-    return {
-      id: message.message_id,
-      content: this.extractTextContent(message),
-      sender: {
-        id: sender.sender_id.user_id,
-        name: sender.sender_id.user_id, // 飞书需要额外查询用户信息
-      },
-      target: {
-        type: message.chat_type === 'p2p' ? 'user' : 'channel',
-        id: message.chat_id,
-      },
-      raw: event,
-      timestamp: new Date(parseInt(message.create_time)),
-    };
-  }
-  
-  private toLarkFormat(content: MessageContent): LarkMessage {
-    if (content.text) {
-      return {
-        msg_type: 'text',
-        content: { text: content.text },
-      };
-    }
-    
-    // 支持更多格式...
-    
-    return {
-      msg_type: 'text',
-      content: { text: '' },
-    };
-  }
-  
-  private verifySignature(body: string, signature: string): boolean {
-    // 实现签名验证
-    const expected = crypto
-      .createHmac('sha256', this.webhookSecret)
-      .update(body)
-      .digest('base64');
-    
-    return signature === expected;
+  private fromStandard(content: any): any {
+    // 实现反向转换
   }
 }
 ```
 
-### 6.4.3 测试验证
-
-**单元测试**：
+**第二步：注册适配器**
 
 ```typescript
-// /src/lark/adapter.test.ts
+// src/channels/registry.ts
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { LarkAdapter } from './adapter';
+import { SlackAdapter } from '../slack/adapter';
 
-describe('LarkAdapter', () => {
-  let adapter: LarkAdapter;
-  
-  beforeEach(() => {
-    adapter = new LarkAdapter({
-      appId: 'test-app-id',
-      appSecret: 'test-app-secret',
-      webhookSecret: 'test-webhook-secret',
-    });
-  });
-  
-  it('should convert text message to Lark format', () => {
-    const result = (adapter as any).toLarkFormat({
-      text: 'Hello, World!',
-    });
-    
-    expect(result).toEqual({
-      msg_type: 'text',
-      content: { text: 'Hello, World!' },
-    });
-  });
-  
-  it('should convert Lark event to standard message', () => {
-    const event = {
-      event: {
-        message: {
-          message_id: 'msg_123',
-          chat_type: 'p2p',
-          chat_id: 'chat_456',
-          create_time: '1705312200000',
-          content: JSON.stringify({ text: 'Test message' }),
-        },
-        sender: {
-          sender_id: { user_id: 'user_789' },
-        },
-      },
-    };
-    
-    const result = (adapter as any).toStandardMessage(event);
-    
-    expect(result.id).toBe('msg_123');
-    expect(result.content).toBe('Test message');
-    expect(result.sender.id).toBe('user_789');
-  });
-});
-```
-
-**集成测试**：
-
-```bash
-# 启动测试网关
-openclaw gateway run --config test.config.json
-
-# 发送测试消息
-curl -X POST http://localhost:3001/webhook/lark \
-  -H "Content-Type: application/json" \
-  -H "X-Lark-Signature: xxx" \
-  -d '{
-    "type": "event_callback",
-    "event": {
-      "message": {
-        "message_id": "test_msg",
-        "chat_type": "p2p",
-        "chat_id": "test_chat",
-        "create_time": "1705312200000",
-        "content": "{\"text\": \"Hello\"}"
-      },
-      "sender": {
-        "sender_id": { "user_id": "test_user" }
-      }
-    }
-  }'
-```
-
-### 6.4.4 集成到主流程
-
-**注册适配器**：
-
-```typescript
-// /src/channels/registry.ts
-
-import { LarkAdapter } from '../lark/adapter';
-
-const channelAdapters: Record<string, new (config: unknown) => Channel> = {
+export const channelRegistry = {
   discord: DiscordAdapter,
   telegram: TelegramAdapter,
-  slack: SlackAdapter,
-  lark: LarkAdapter,  // 添加飞书适配器
-  // ...
+  lark: LarkAdapter,
+  slack: SlackAdapter,  // 新增
 };
+```
 
-export function createChannel(type: string, config: unknown): Channel {
-  const AdapterClass = channelAdapters[type];
-  if (!AdapterClass) {
-    throw new Error(`Unknown channel type: ${type}`);
+**第三步：配置启用**
+
+```yaml
+# config.yaml
+channels:
+  slack:
+    enabled: true
+    token: ${SLACK_BOT_TOKEN}
+    signingSecret: ${SLACK_SIGNING_SECRET}
+```
+
+### 6.4.2 需要处理的问题
+
+| 问题 | 解决方案 |
+|------|---------|
+| **消息格式差异** | 定义清晰的映射规则 |
+| **富媒体支持** | 提取通用能力，不支持的功能降级 |
+| **限流策略** | 适配器层实现队列和重试 |
+| **连接稳定性** | 实现断线重连和心跳机制 |
+
+---
+
+## 6.5 最佳实践
+
+### 6.5.1 平台选择建议
+
+| 场景 | 推荐平台 | 理由 |
+|------|---------|------|
+| **开源社区** | Discord | 开发者生态好，机器人生态丰富 |
+| **国际化产品** | Telegram | 全球用户多，隐私保护好 |
+| **国内企业** | 飞书 | 办公集成度高，审批流程完善 |
+| **团队协作** | Slack | 企业级功能，集成能力强 |
+| **个人助手** | iMessage | 苹果生态原生体验 |
+
+### 6.5.2 多平台策略
+
+**同时接入多个平台**：
+
+```yaml
+channels:
+  # 主要平台
+  discord:
+    enabled: true
+    token: ${DISCORD_TOKEN}
+  
+  # 备用平台
+  telegram:
+    enabled: true
+    token: ${TELEGRAM_TOKEN}
+  
+  # 企业用户
+  lark:
+    enabled: true
+    appId: ${LARK_APP_ID}
+    appSecret: ${LARK_APP_SECRET}
+```
+
+**平台差异化处理**：
+
+```typescript
+// 根据平台特性调整回复
+function formatReply(platform: string, content: string): any {
+  switch (platform) {
+    case 'discord':
+      // Discord 支持 Markdown 和 Embed
+      return { embeds: [{ description: content }] };
+    
+    case 'telegram':
+      // Telegram 支持 HTML 解析
+      return { text: content, parse_mode: 'HTML' };
+    
+    case 'lark':
+      // 飞书使用卡片消息
+      return { card: createCard(content) };
+    
+    default:
+      return { text: content };
   }
-  return new AdapterClass(config);
 }
 ```
 
-**配置示例**：
+---
 
-```json
-{
-  "channels": {
-    "lark": {
-      "enabled": true,
-      "accounts": {
-        "default": {
-          "appId": "${LARK_APP_ID}",
-          "appSecret": "${LARK_APP_SECRET}",
-          "webhookSecret": "${LARK_WEBHOOK_SECRET}",
-          "webhookPort": 3001
-        }
-      }
-    }
-  }
-}
+## 6.6 本章小结
+
+### 核心概念
+
+1. **抽象层屏蔽差异**，业务逻辑只需处理统一格式
+2. **适配器实现接口**，每个平台独立封装
+3. **统一消息格式**，包含完整上下文信息
+4. **易于扩展**，新增平台只需添加适配器
+
+### 架构要点
+
+```
+业务逻辑
+    ↓
+统一消息格式
+    ↓
+通道抽象层
+    ↓
+平台适配器（Discord/Telegram/飞书/...）
+    ↓
+各平台 API
 ```
 
----
+### 下一步
 
-## 本章小结
-
-通过本章的学习，你应该深入理解了：
-
-1. **Channel 设计哲学** - 为什么需要抽象层、适配器模式
-2. **消息标准化** - MsgContext 结构、平台字段映射、媒体处理
-3. **白名单与权限** - Allow List、提及门控、命令授权、群组策略
-4. **实现新 Channel** - 从需求分析到集成测试的完整流程
-
-**核心要点**：
-- 抽象层实现代码复用和易于扩展
-- 标准化是统一不同平台的关键
-- 权限控制确保系统安全
-- 实现新 Channel 只需关注平台差异
-
-**下一步**：进入第 7 章，深入了解配置系统。
+在下一章，我们将深入了解：
+- Discord 平台的具体接入方式
+- 如何创建 Discord Bot
+- Discord 的高级功能使用
 
 ---
 
-## 练习与思考
+## 参考资源
 
-1. **接口设计**：为微信（WeChat）平台设计 Channel 接口实现方案。
-
-2. **字段映射**：对比 Discord 和 Telegram 的字段差异，列出标准化映射表。
-
-3. **权限实验**：配置不同的白名单和提及策略，测试各种场景下的响应行为。
-
-4. **适配器实现**：尝试实现一个简单的 Echo Channel，将收到的消息原样返回。
-
-5. **性能测试**：对比直接调用平台 API 和通过 Channel 抽象层的性能差异。
-
----
-
-*下一章：第 7 章 配置系统深度解析*
+- 适配器开发文档：https://docs.openclaw.ai/channels
+- Discord 集成指南：https://docs.openclaw.ai/discord
+- Telegram 集成指南：https://docs.openclaw.ai/telegram
+- 飞书集成指南：https://docs.openclaw.ai/lark
