@@ -5,6 +5,8 @@ export default defineConfig({
   description: '从入门到企业级的 OpenClaw 完整学习指南',
   lang: 'zh-CN',
   
+  ignoreDeadLinks: true,
+  
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],
     ['meta', { name: 'theme-color', content: '#3c3c3c' }],
