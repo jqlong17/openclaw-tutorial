@@ -59,13 +59,22 @@ my-first-agent/
 
 OpenClaw 支持多种 LLM 提供商：
 
-| 提供商 | 获取方式 | 特点 |
-|--------|---------|------|
-| **Moonshot** | https://platform.moonshot.cn | 国内可用，Kimi 模型 |
-| **OpenAI** | https://platform.openai.com | GPT-4，功能强大 |
-| **Together** | https://together.ai | 开源模型，性价比高 |
+| 提供商 | 获取方式 | 特点 | 计费方式 |
+|--------|---------|------|---------|
+| **Moonshot** | https://platform.moonshot.cn | 国内可用，Kimi 模型 | 按量付费 |
+| **MiniMax** | https://platform.minimaxi.com | 国内可用，包月套餐 | **包月推荐** |
+| **OpenAI** | https://platform.openai.com | GPT-4，功能强大 | 按量付费 |
+| **Together** | https://together.ai | 开源模型，性价比高 | 按量付费 |
 
-**推荐**：国内用户选择 Moonshot（Kimi）
+**成本建议**：
+
+OpenClaw 的 Agent 会频繁调用 LLM API，**按量计费可能产生较高费用**。建议：
+
+- **国内用户**：选择 **MiniMax** 的包月套餐，性价比最高
+- **轻量使用**：Moonshot（Kimi）按量付费，适合测试
+- **企业场景**：MiniMax 或 OpenAI 的企业套餐
+
+**推荐**：新手先用 MiniMax 包月，成本可控。
 
 ### 2.2.2 配置环境变量
 
@@ -83,6 +92,17 @@ OPENAI_API_KEY=your-api-key
 
 编辑 `config/openclaw.yaml`：
 
+**MiniMax 包月（推荐）**：
+```yaml
+models:
+  default: minimax
+  providers:
+    minimax:
+      apiKey: ${MINIMAX_API_KEY}
+      model: MiniMax-M2.1
+```
+
+**Moonshot 按量**：
 ```yaml
 models:
   default: moonshot
@@ -91,6 +111,11 @@ models:
       apiKey: ${MOONSHOT_API_KEY}
       model: kimi-k2.5
 ```
+
+**成本对比**：
+- MiniMax 包月：¥99/月，无限调用
+- Moonshot 按量：约 ¥0.01-0.03/千 tokens
+- 如果每天对话 1000 轮，包月更划算
 
 ---
 
