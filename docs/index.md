@@ -2,65 +2,179 @@
 layout: home
 
 hero:
-  name: "OpenClaw"
-  text: "多平台 AI Agent 框架"
-  tagline: 一套代码，同时服务 Discord、Telegram、飞书等多个平台。让企业级 AI 助手开发变得简单。
-  image:
-    src: /logo.svg
-    alt: OpenClaw
-  actions:
-    - theme: brand
-      text: 🚀 10 分钟快速开始
-      link: /guide/chapter-02
-    - theme: alt
-      text: 📖 阅读完整教程
-      link: /guide/
-    - theme: alt
-      text: ⭐ GitHub Star
-      link: https://github.com/openclaw/openclaw
-
-features:
-  - icon: 🎯
-    title: 多平台统一接入
-    details: 一套代码同时接入 Discord、Telegram、飞书、iMessage。用户从哪个平台来，体验都一致。
-  - icon: 🧠
-    title: AI Agent 框架
-    details: 内置工具调用、记忆系统、多模态理解。让 AI 不仅能聊天，还能真正帮你完成任务。
-  - icon: 🏢
-    title: 企业级就绪
-    details: 网关层设计、多节点部署、安全权限、监控运维。从个人项目到企业级应用无缝扩展。
-  - icon: 💰
-    title: 成本可控
-    details: 智能限流、模型降级、包月套餐支持。避免 AI 调用成本失控，适合大规模部署。
-  - icon: 🔌
-    title: 生态丰富
-    details: 官方支持 10+ 平台，社区贡献 50+ 工具插件。快速对接现有系统。
-  - icon: 📦
-    title: 私有化部署
-    details: 数据完全自主可控，支持本地部署、私有云、混合云。满足企业合规要求。
+  name: ""
+  text: ""
+  tagline: ""
 ---
 
-## 为什么选择 OpenClaw？
+<div class="hero-container">
+  <!-- 主视觉区域 -->
+  <div class="hero-section">
+    <div class="hero-badge">
+      🚀 v2.0 正式发布
+    </div>
+    
+    <h1 class="hero-title">
+      构建
+      <span class="gradient-text">多平台 AI Agent</span>
+      <br/>
+      从未如此简单
+    </h1>
+    
+    <p class="hero-description">
+      OpenClaw 是专为 AI Agent 设计的网关层框架。
+      <br/>
+      一套代码，同时接入 Discord、Telegram、飞书等平台。
+      <br/>
+      内置企业级特性，让 AI 应用从原型到生产只需一步。
+    </p>
+    
+    <div class="hero-actions">
+      <a href="/guide/chapter-02" class="btn btn-primary">
+        <span class="btn-icon">🚀</span>
+        10 分钟开始
+      </a>
+      <a href="https://github.com/openclaw/openclaw" class="btn btn-secondary" target="_blank">
+        <span class="btn-icon">⭐</span>
+        GitHub Star
+      </a>
+      <a href="/guide/" class="btn btn-ghost">
+        浏览文档 →
+      </a>
+    </div>
+  </div>
 
-### 与其他方案对比
+  <!-- 信任背书 -->
+  <div class="trust-section">
+    <p class="trust-label">适用于</p>
+    <div class="trust-tags">
+      <span class="trust-tag">👤 个人开发者</span>
+      <span class="trust-tag">🏢 企业用户</span>
+      <span class="trust-tag">🚀 创业公司</span>
+      <span class="trust-tag">🏛️ 开源社区</span>
+    </div>
+  </div>
 
-| 特性 | ChatGPT | OpenAI API | Coze/扣子 | **OpenClaw** |
-|------|---------|-----------|-----------|--------------|
-| 多平台接入 | ❌ 仅网页 | ❌ 需自建 | ⚠️ 有限 | ✅ **全平台** |
-| 开发成本 | - | 高 | 低 | **中** |
-| 自定义能力 | ❌ 无 | ✅ 完整 | ⚠️ 受限 | ✅ **完整** |
-| 企业级特性 | ❌ 无 | ❌ 需自建 | ⚠️ 部分 | ✅ **内置** |
-| 私有化部署 | ❌ 不可 | ✅ 可 | ❌ 不可 | ✅ **支持** |
-| 数据可控 | ❌ 不可 | ✅ 可 | ❌ 不可 | ✅ **完全可控** |
+  <!-- 核心特性卡片 -->
+  <div class="features-section">
+    <h2 class="section-title">
+      为什么选择
+      <span class="highlight">OpenClaw</span>？
+    </h2>
+    
+    <div class="features-grid">      <div class="feature-card featured">
+        <div class="feature-icon">🎯</div>
+        <h3>多平台统一接入</h3>
+        <p>一套代码同时服务 Discord、Telegram、飞书、iMessage。用户从哪个平台来，体验完全一致。</p>
+        <div class="feature-meta">支持 10+ 平台 →</div>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>AI Agent 框架</h3>
+        <p>内置工具调用、记忆系统、多模态理解。让 AI 不仅能聊天，还能真正帮你完成任务。</p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-icon">🏢</div>
+        <h3>企业级就绪</h3>
+        <p>网关层设计、多节点部署、安全权限、监控运维。从个人项目到企业级应用无缝扩展。</p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-icon">💰</div>
+        <h3>成本可控</h3>
+        <p>智能限流、模型降级、包月套餐支持。避免 AI 调用成本失控，适合大规模部署。</p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <h3>生态丰富</h3>
+        <p>官方支持 10+ 平台，社区贡献 50+ 工具插件。快速对接现有系统。</p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>私有化部署</h3>
+        <p>数据完全自主可控，支持本地部署、私有云、混合云。满足企业合规要求。</p>
+      </div>
+    </div>
+  </div>
 
-**OpenClaw 的定位**：比直接调用 API 更简单，比低代码平台更灵活，比通用网关更懂 AI。
+  <!-- 对比表格 -->
+  <div class="comparison-section">
+    <h2 class="section-title">与其他方案对比</h2>
+    
+    <div class="comparison-table-wrapper">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>特性</th>
+            <th>ChatGPT</th>
+            <th>OpenAI API</th>
+            <th>Coze/扣子</th>
+            <th class="highlight-col">OpenClaw</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>多平台接入</td>
+            <td>❌ 仅网页</td>
+            <td>❌ 需自建</td>
+            <td>⚠️ 有限</td>
+            <td class="highlight-col">✅ 全平台</td>
+          </tr>
+          <tr>
+            <td>开发成本</td>
+            <td>-</td>
+            <td>高</td>
+            <td>低</td>
+            <td class="highlight-col">中</td>
+          </tr>
+          <tr>
+            <td>自定义能力</td>
+            <td>❌ 无</td>
+            <td>✅ 完整</td>
+            <td>⚠️ 受限</td>
+            <td class="highlight-col">✅ 完整</td>
+          </tr>
+          <tr>
+            <td>企业级特性</td>
+            <td>❌ 无</td>
+            <td>❌ 需自建</td>
+            <td>⚠️ 部分</td>
+            <td class="highlight-col">✅ 内置</td>
+          </tr>
+          <tr>
+            <td>私有化部署</td>
+            <td>❌ 不可</td>
+            <td>✅ 可</td>
+            <td>❌ 不可</td>
+            <td class="highlight-col">✅ 支持</td>
+          </tr>
+          <tr>
+            <td>数据可控</td>
+            <td>❌ 不可</td>
+            <td>✅ 可</td>
+            <td>❌ 不可</td>
+            <td class="highlight-col">✅ 完全可控</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <p class="comparison-summary">
+      <strong>OpenClaw 的定位</strong>：
+      比直接调用 API 更简单，比低代码平台更灵活，比通用网关更懂 AI。
+    </p>
+  </div>
 
----
-
-## 架构预览
-
-```
-┌─────────────────────────────────────────────────────────┐
+  <!-- 架构图 -->
+  <div class="architecture-section">
+    <h2 class="section-title">架构设计</h2>
+    
+    <div class="architecture-diagram">
+      <pre>┌─────────────────────────────────────────────────────────┐
 │  用户接入层（Discord / Telegram / 飞书 / iMessage）        │
 └──────────────────────┬──────────────────────────────────┘
                        │
@@ -82,97 +196,401 @@ features:
                        │
 ┌──────────────────────▼──────────────────────────────────┐
 │  基础设施层（LLM / 向量数据库 / 文件存储 / 外部 API）        │
-└─────────────────────────────────────────────────────────┘
-```
+└─────────────────────────────────────────────────────────┘</pre>
+    </div>
+    
+    <p class="architecture-desc">
+      网关层统一处理多平台接入，Agent 层专注 AI 能力，基础设施层提供底层支持。
+      <br/>
+      分层设计让系统更易扩展、更易维护。
+    </p>
+  </div>
 
-**核心设计**：网关层统一处理多平台接入，Agent 层专注 AI 能力，基础设施层提供底层支持。
+  <!-- 统计数据 -->
+  <div class="stats-section">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-number">10+</div>
+        <div class="stat-label">支持平台</div>
+      </div>
+      
+      <div class="stat-item">
+        <div class="stat-number">50+</div>
+        <div class="stat-label">社区插件</div>
+      </div>
+      
+      <div class="stat-item">
+        <div class="stat-number">24</div>
+        <div class="stat-label">教程章节</div>
+      </div>
+      
+      <div class="stat-item">
+        <div class="stat-number">100%</div>
+        <div class="stat-label">开源免费</div>
+      </div>
+    </div>
+  </div>
 
----
-
-## 快速开始
-
-### 方式一：npm 安装（推荐新手）
-
-```bash
-# 安装 CLI
+  <!-- 快速开始 -->
+  <div class="quickstart-section">
+    <h2 class="section-title">5 分钟快速开始</h2>
+    
+    <div class="quickstart-content">
+      <pre class="code-block"><code># 安装 CLI
 npm install -g @openclaw/cli
 
 # 创建项目
-openclaw init my-agent
-cd my-agent
+openclaw init my-agent && cd my-agent
 
-# 配置模型（支持 MiniMax 包月、DeepSeek、Kimi 等）
+# 配置模型（推荐 MiniMax 包月）
 echo "MINIMAX_API_KEY=your-key" > .env
 
-# 启动
+# 启动开发服务器
 openclaw dev
-```
 
-### 方式二：源码安装（推荐开发者）
+# 现在可以在终端与 Agent 对话了！</code></pre>
+    </div>
+  </div>
 
-```bash
-# 克隆仓库
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+  <!-- CTA -->
+  <div class="cta-section">
+    <h2>准备好开始了吗？</h2>
+    <p>加入数千名开发者，用 OpenClaw 构建你的 AI Agent</p>
+    
+    <div class="cta-actions">
+      <a href="/guide/chapter-01" class="btn btn-primary">
+        阅读完整教程
+      </a>
+      <a href="https://discord.gg/clawd" class="btn btn-secondary" target="_blank">
+        加入 Discord 社区
+      </a>
+    </div>
+  </div>
 
-# 安装依赖并构建
-npm install
-npm run build
+</div>
 
-# 链接到全局
-npm link
+<style>
+.hero-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
 
-# 验证
-openclaw --version
-```
+.hero-section {
+  text-align: center;
+  padding: 60px 0 40px;
+}
 
----
+.hero-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 24px;
+}
 
-## 适用场景
+.hero-title {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 24px;
+  color: var(--vp-c-text-1);
+}
 
-### 👤 个人开发者
-- **智能个人助手**：管理日程、记录笔记、查询信息
-- **知识管理**：构建个人知识库，智能问答
-- **多平台消息管理**：一个助手管理所有平台
+.gradient-text {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 
-### 🏢 企业用户
-- **智能客服**：7x24 小时自动回复，复杂问题转人工
-- **办公助手**：会议记录、任务分配、数据查询
-- **企业知识库**：产品文档智能问答，内部培训
+.hero-description {
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  max-width: 600px;
+  margin: 0 auto 32px;
+}
 
-### 🚀 创业公司
-- **快速原型验证**：几小时搭建 AI 应用原型
-- **产品 MVP**：低成本验证市场需求
-- **规模化扩展**：从原型到生产环境无缝升级
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 48px;
+}
 
----
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s;
+}
 
-## 教程结构
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
 
-本教程共 **24 章**，带你从入门到精通：
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
 
-| 模块 | 章节 | 核心内容 |
-|------|------|---------|
-| **基础入门** | 1-3 章 | OpenClaw 概览、环境搭建、第一个 Agent |
-| **核心概念** | 4-6 章 | 消息传输、网关架构、通道抽象层 |
-| **平台集成** | 7-11 章 | Discord、Telegram、飞书、iMessage 深度集成 |
-| **AI Agent** | 12-15 章 | 运行器、工具系统、记忆系统、多模态 |
-| **高级特性** | 16-20 章 | 定时任务、插件、多节点、安全、性能 |
-| **实践项目** | 21-24 章 | 入门、进阶、高级、企业级完整项目 |
+.btn-secondary {
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
+}
 
----
+.btn-ghost {
+  color: var(--vp-c-text-2);
+}
 
-## 社区与支持
+.trust-section {
+  text-align: center;
+  padding: 40px 0;
+  border-top: 1px solid var(--vp-c-divider);
+  border-bottom: 1px solid var(--vp-c-divider);
+}
 
-- 💬 [Discord 社区](https://discord.gg/clawd) - 实时讨论、获取帮助
-- 🐙 [GitHub](https://github.com/openclaw/openclaw) - 源码、Issue、PR
-- 📚 [官方文档](https://docs.openclaw.ai) - API 参考、配置指南
-- 📝 [本教程源码](https://github.com/jqlong17/openclaw-tutorial) - 欢迎贡献
+.trust-label {
+  font-size: 14px;
+  color: var(--vp-c-text-3);
+  margin-bottom: 16px;
+}
 
----
+.trust-tags {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
 
-## 许可
+.trust-tag {
+  padding: 8px 16px;
+  background: var(--vp-c-bg-soft);
+  border-radius: 20px;
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+}
 
-本教程采用 [MIT 许可证](https://opensource.org/licenses/MIT)
+.features-section {
+  padding: 80px 0;
+}
 
-OpenClaw 项目采用 [Apache 2.0 许可证](https://github.com/openclaw/openclaw/blob/main/LICENSE)
+.section-title {
+  text-align: center;
+  font-size: 36px;
+  font-weight: 700;
+  margin-bottom: 48px;
+  color: var(--vp-c-text-1);
+}
+
+.highlight {
+  color: #667eea;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.feature-card {
+  padding: 32px;
+  background: var(--vp-c-bg-soft);
+  border-radius: 16px;
+  border: 1px solid var(--vp-c-divider);
+  transition: all 0.2s;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+}
+
+.feature-card.featured {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+.feature-icon {
+  font-size: 40px;
+  margin-bottom: 16px;
+}
+
+.feature-card h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--vp-c-text-1);
+}
+
+.feature-card p {
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.feature-meta {
+  font-size: 14px;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.comparison-section {
+  padding: 80px 0;
+  background: var(--vp-c-bg-soft);
+  margin: 0 -24px;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.comparison-table-wrapper {
+  overflow-x: auto;
+  margin-bottom: 24px;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.comparison-table th {
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  background: var(--vp-c-bg);
+}
+
+.comparison-table td {
+  color: var(--vp-c-text-2);
+}
+
+.highlight-col {
+  background: rgba(102, 126, 234, 0.05);
+  font-weight: 500;
+}
+
+.comparison-summary {
+  text-align: center;
+  color: var(--vp-c-text-2);
+}
+
+.architecture-section {
+  padding: 80px 0;
+}
+
+.architecture-diagram {
+  max-width: 700px;
+  margin: 0 auto 32px;
+}
+
+.architecture-diagram pre {
+  background: var(--vp-c-bg-soft);
+  padding: 24px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.architecture-desc {
+  text-align: center;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+}
+
+.stats-section {
+  padding: 60px 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  margin: 0 -24px;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 32px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.stat-item {
+  text-align: center;
+  color: white;
+}
+
+.stat-number {
+  font-size: 48px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 16px;
+  opacity: 0.9;
+}
+
+.quickstart-section {
+  padding: 80px 0;
+}
+
+.quickstart-content {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.code-block {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 24px;
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.cta-section {
+  text-align: center;
+  padding: 80px 0;
+  background: var(--vp-c-bg-soft);
+  margin: 0 -24px;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.cta-section h2 {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: var(--vp-c-text-1);
+}
+
+.cta-section p {
+  color: var(--vp-c-text-2);
+  margin-bottom: 32px;
+}
+
+.cta-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+</style>
