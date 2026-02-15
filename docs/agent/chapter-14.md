@@ -325,7 +325,7 @@ OpenClaw 会自动：
 > 步骤：
 > 1. 安装 Docker
 > 2. 运行 `docker-compose up`
-> 3. 访问 http://localhost:3000
+> 3. 访问本地服务
 
 **建议三：及时更新**
 
