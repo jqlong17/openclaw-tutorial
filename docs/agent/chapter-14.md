@@ -1,1039 +1,430 @@
 # 第 14 章：记忆系统（RAG）
 
-> 本章将深入解析 OpenClaw 的记忆系统，包括向量嵌入、存储、检索和优化等核心技术。
+> 本章将讲解 OpenClaw 的记忆系统，包括为什么需要记忆、RAG 原理和使用方式。
 
 ---
 
-## 14.1 RAG 概述
+## 14.1 为什么 AI 需要记忆？
 
-### 14.1.1 什么是 RAG
+### 14.1.1 没有记忆的问题
 
-RAG（Retrieval-Augmented Generation，检索增强生成）是一种将外部知识检索与语言模型生成相结合的技术：
+**场景一：记不住之前的对话**
 
-```mermaid
-graph LR
-    A[用户查询] --> B[检索相关文档]
-    B --> C[构建增强提示词]
-    C --> D[语言模型生成]
-    D --> E[返回结果]
+> 你：我叫张三。
+> AI：好的，张三你好！
+> 你：我叫什么名字？
+> AI：抱歉，我不知道你的名字。
+
+**问题**：AI 忘记了刚才的对话。
+
+**场景二：记不住重要信息**
+
+> 你：下周三下午3点我有个重要会议。
+> AI：好的，我记下了。
+> （一周后）
+> 你：我今天有什么安排？
+> AI：抱歉，我不知道你的安排。
+
+**问题**：AI 没有长期记忆。
+
+**场景三：无法利用已有知识**
+
+> 你：根据我们之前讨论的方案，下一步该怎么做？
+> AI：抱歉，我没有之前的讨论记录。
+
+**问题**：AI 无法访问历史信息。
+
+### 14.1.2 记忆的两种类型
+
+**短期记忆（对话上下文）**：
+- 记住当前对话的几条消息
+- 像人类的短期记忆，容量有限
+- 用于理解当前话题
+
+**长期记忆（知识库）**：
+- 记住重要的信息、事实、偏好
+- 像人类的长期记忆，容量大
+- 用于积累知识和经验
+
+**类比理解**：
+
+想象你在和朋友聊天：
+- **短期记忆**：记住刚才聊的内容，保持对话连贯
+- **长期记忆**：记住朋友喜欢什么、之前发生过什么
+
+---
+
+## 14.2 什么是 RAG？
+
+### 14.2.1 RAG 的概念
+
+**RAG** = **R**etrieval（检索）+ **A**ugmented（增强）+ **G**eneration（生成）
+
+**通俗解释**：
+
+RAG 让 AI 在回答问题前，先**查资料**，再**回答**。
+
+**传统方式**：
+> 你：OpenClaw 支持哪些平台？
+> AI：（仅凭训练时的知识）
+> AI：OpenClaw 支持 Discord 和 Telegram。
+> （可能遗漏了新支持的平台）
+
+**RAG 方式**：
+> 你：OpenClaw 支持哪些平台？
+> AI：（先查资料）
+> AI：根据最新文档，OpenClaw 支持：
+> - Discord
+> - Telegram
+> - 飞书
+> - iMessage
+> （信息准确且最新）
+
+### 14.2.2 RAG 的工作原理
+
+**三步流程**：
+
+```
+用户提问 → 检索相关资料 → AI 结合资料回答
 ```
 
-**RAG 的优势**：
+**详细过程**：
 
-| 优势 | 说明 |
-|------|------|
-| **知识更新** | 无需重新训练模型即可更新知识 |
-| **可解释性** | 可以追溯答案来源 |
-| **减少幻觉** | 基于真实文档生成，减少编造 |
-| **领域适配** | 轻松适配特定领域知识 |
+**第一步：存储知识**
 
-### 14.1.2 OpenClaw 记忆架构
+把文档转换成 AI 能理解的形式：
+1. **读取文档**：加载 Markdown 文件、PDF 等
+2. **切分文档**：把长文档切成小段
+3. **转换为向量**：把文字转换成数字向量
+4. **存储**：保存到向量数据库
 
-```mermaid
-graph TB
-    subgraph 输入层
-        MD[Markdown文件]
-        SE[会话历史]
-    end
+**第二步：检索知识**
 
-    subgraph 处理层
-        CH[分块]
-        EM[嵌入模型]
-        IN[索引构建]
-    end
+当用户提问时：
+1. **理解问题**：把问题也转换成向量
+2. **搜索相似**：在数据库中找最相似的文档片段
+3. **返回结果**：把找到的相关内容给 AI
 
-    subgraph 存储层
-        VEC[向量存储<br/>sqlite-vec]
-        FTS[全文索引<br/>FTS5]
-        META[元数据存储]
-    end
+**第三步：生成回答**
 
-    subgraph 检索层
-        VQ[向量检索]
-        FQ[全文检索]
-        MR[结果合并]
-    end
+AI 结合检索到的资料：
+1. **阅读资料**：理解检索到的内容
+2. **组织语言**：基于资料组织回答
+3. **生成回复**：输出最终答案
 
-    MD --> CH
-    SE --> CH
-    CH --> EM
-    EM --> IN
-    IN --> VEC
-    IN --> FTS
-    IN --> META
-    VEC --> VQ
-    FTS --> FQ
-    VQ --> MR
-    FQ --> MR
-```
+**类比理解**：
 
-### 14.1.3 记忆系统组件
+想象 RAG 是一个**开卷考试**：
+- **传统 AI**：闭卷考试，只能凭记忆回答
+- **RAG**：开卷考试，可以查资料再回答
 
-| 组件 | 功能 | 技术 |
+### 14.2.3 RAG 的优势
+
+| 优势 | 说明 | 例子 |
 |------|------|------|
-| **文档加载器** | 读取 Markdown 文件 | 文件系统监听 |
-| **文本分割器** | 将文档切分为块 | 语义分割 |
-| **嵌入模型** | 文本向量化 | OpenAI/Gemini/本地模型 |
-| **向量数据库** | 存储向量索引 | sqlite-vec |
-| **全文索引** | 关键词检索 | SQLite FTS5 |
-| **检索器** | 混合检索 | 向量+关键词 |
+| **知识更新** | 不用重新训练模型 | 添加新文档，AI 立即知道 |
+| **更准确** | 基于真实资料回答 | 减少"编造"信息 |
+| **可溯源** | 知道答案来自哪里 | 可以查看参考文档 |
+| **个性化** | 使用自己的知识库 | 基于个人笔记回答 |
 
 ---
 
-## 14.2 嵌入模型
+## 14.3 向量是什么？
 
-### 14.2.1 嵌入原理
+### 14.3.1 从文字到数字
 
-文本嵌入将文本转换为高维向量，语义相似的文本在向量空间中距离更近：
+**问题**：计算机如何理解"苹果"和"香蕉"很相似？
+
+**解决方案**：把文字转换成数字向量。
+
+**什么是向量？**
+
+向量就是一串数字，比如：
+> [0.2, -0.5, 0.8, 0.1, -0.3]
+
+**神奇之处**：
+- 语义相似的词，向量也相似
+- "苹果"和"香蕉"的向量很接近（都是水果）
+- "苹果"和"汽车"的向量很远（不相关）
+
+### 14.3.2 嵌入模型
+
+**嵌入模型**就是把文字转换成向量的工具。
+
+**工作原理**：
 
 ```
-文本: "苹果是一种水果"
-     ↓ 嵌入模型
-向量: [0.23, -0.56, 0.89, ..., 0.12]  (1536 维)
-
-文本: "iPhone 是智能手机"
-     ↓ 嵌入模型
-向量: [0.45, -0.12, 0.67, ..., -0.34]
-
-相似度计算: cos(θ) = (A·B) / (|A|×|B|)
+文字 → 嵌入模型 → 向量
 ```
 
-### 14.2.2 模型选择
+**示例**：
 
-OpenClaw 支持多种嵌入模型：
+> "苹果" → [0.2, -0.5, 0.8, ...]
+> "香蕉" → [0.3, -0.4, 0.7, ...]
+> "汽车" → [-0.8, 0.2, -0.1, ...]
 
-| 提供商 | 模型 | 维度 | 特点 |
-|--------|------|------|------|
-| **OpenAI** | text-embedding-3-small | 1536 | 效果好，速度快 |
-| **OpenAI** | text-embedding-3-large | 3072 | 效果更好 |
-| **Gemini** | embedding-001 | 768 | Google 出品 |
-| **Voyage** | voyage-2 | 1024 | 专业嵌入模型 |
-| **本地** | embeddinggemma | 384 | 无需网络，隐私好 |
+**相似度计算**：
 
-**配置示例**：
+通过计算向量之间的距离，判断语义相似度：
+- "苹果"和"香蕉"：相似度 95%（都是水果）
+- "苹果"和"汽车"：相似度 10%（不相关）
 
-```json
-{
-  "memory": {
-    "enabled": true,
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "apiKey": "${OPENAI_API_KEY}",
-    "cache": {
-      "enabled": true,
-      "maxEntries": 10000
-    }
-  }
-}
-```
+### 14.3.3 为什么用向量？
 
-### 14.2.3 嵌入实现
+**优势一：语义理解**
 
-```typescript
-// /src/memory/embeddings.ts
+不只是关键词匹配，能理解含义：
+- "苹果"和"iPhone"：向量接近（知道是同一个公司）
+- "苹果"和"水果"：向量接近（知道是食物）
 
-interface EmbeddingProvider {
-  id: string;
-  model: string;
-  maxInputTokens: number;
-  embedQuery(text: string): Promise<number[]>;
-  embedBatch(texts: string[]): Promise<number[][]>;
-}
+**优势二：模糊匹配**
 
-// OpenAI 嵌入
-class OpenAIEmbeddingProvider implements EmbeddingProvider {
-  id = 'openai';
-  model = 'text-embedding-3-small';
-  maxInputTokens = 8191;
-  
-  constructor(private apiKey: string) {}
-  
-  async embedQuery(text: string): Promise<number[]> {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input: text,
-        model: this.model,
-      }),
-    });
-    
-    const data = await response.json();
-    return data.data[0].embedding;
-  }
-  
-  async embedBatch(texts: string[]): Promise<number[][]> {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input: texts,
-        model: this.model,
-      }),
-    });
-    
-    const data = await response.json();
-    return data.data.map((d: any) => d.embedding);
-  }
-}
-
-// 本地嵌入（使用 node-llama-cpp）
-class LocalEmbeddingProvider implements EmbeddingProvider {
-  id = 'local';
-  model = 'embeddinggemma-300m';
-  maxInputTokens = 512;
-  private context: LlamaEmbeddingContext | null = null;
-  
-  async initialize() {
-    const { getLlama } = await import('node-llama-cpp');
-    const llama = await getLlama();
-    
-    const model = await llama.loadModel({
-      modelPath: await llama.resolveModelFile(
-        'hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf'
-      ),
-    });
-    
-    this.context = await model.createEmbeddingContext();
-  }
-  
-  async embedQuery(text: string): Promise<number[]> {
-    if (!this.context) {
-      throw new Error('Provider not initialized');
-    }
-    
-    const embedding = await this.context.getEmbeddingFor(text);
-    return Array.from(embedding.vector);
-  }
-  
-  async embedBatch(texts: string[]): Promise<number[][]> {
-    return Promise.all(texts.map(t => this.embedQuery(t)));
-  }
-}
-```
-
-### 14.2.4 批量嵌入优化
-
-```typescript
-// /src/memory/batch-embeddings.ts
-
-class BatchEmbeddingProcessor {
-  private batchSize = 100;
-  private concurrency = 5;
-  
-  async processBatches(
-    chunks: TextChunk[],
-    provider: EmbeddingProvider
-  ): Promise<EmbeddedChunk[]> {
-    const results: EmbeddedChunk[] = [];
-    
-    // 分批次处理
-    for (let i = 0; i < chunks.length; i += this.batchSize) {
-      const batch = chunks.slice(i, i + this.batchSize);
-      
-      console.log(`Processing batch ${i / this.batchSize + 1}/${Math.ceil(chunks.length / this.batchSize)}`);
-      
-      // 批量嵌入
-      const embeddings = await provider.embedBatch(
-        batch.map(c => c.text)
-      );
-      
-      // 组合结果
-      for (let j = 0; j < batch.length; j++) {
-        results.push({
-          ...batch[j],
-          embedding: embeddings[j],
-        });
-      }
-    }
-    
-    return results;
-  }
-  
-  // 带重试的批量处理
-  async processWithRetry(
-    chunks: TextChunk[],
-    provider: EmbeddingProvider,
-    maxRetries = 3
-  ): Promise<EmbeddedChunk[]> {
-    const results: EmbeddedChunk[] = [];
-    const failed: TextChunk[] = [];
-    
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const toProcess = attempt === 0 ? chunks : failed;
-      failed.length = 0;
-      
-      try {
-        const batchResults = await this.processBatches(toProcess, provider);
-        results.push(...batchResults);
-      } catch (error) {
-        console.error(`Batch attempt ${attempt + 1} failed:`, error);
-        
-        // 如果批量失败，逐个重试
-        for (const chunk of toProcess) {
-          try {
-            const embedding = await provider.embedQuery(chunk.text);
-            results.push({ ...chunk, embedding });
-          } catch {
-            failed.push(chunk);
-          }
-        }
-      }
-      
-      if (failed.length === 0) break;
-    }
-    
-    if (failed.length > 0) {
-      console.warn(`${failed.length} chunks failed to embed`);
-    }
-    
-    return results;
-  }
-}
-```
+即使用不同的词，也能找到相关内容：
+- 搜索"怎么安装"，能找到"安装指南"
+- 搜索"报错"，能找到"错误处理"
 
 ---
 
-## 14.3 记忆存储
+## 14.4 OpenClaw 的记忆系统
 
-### 14.3.1 数据库设计
+### 14.4.1 记忆的类型
 
-```sql
--- 文件表
-CREATE TABLE files (
-    id INTEGER PRIMARY KEY,
-    path TEXT UNIQUE NOT NULL,
-    source TEXT NOT NULL,  -- 'memory' 或 'sessions'
-    last_modified INTEGER NOT NULL,
-    size INTEGER,
-    checksum TEXT
-);
+OpenClaw 有三种记忆：
 
--- 文本块表
-CREATE TABLE chunks (
-    id TEXT PRIMARY KEY,
-    file_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    start_line INTEGER,
-    end_line INTEGER,
-    token_count INTEGER,
-    FOREIGN KEY (file_id) REFERENCES files(id)
-);
+| 类型 | 存储内容 | 用途 |
+|------|---------|------|
+| **会话记忆** | 当前对话的历史 | 保持对话连贯 |
+| **工作区记忆** | 项目相关的笔记 | 积累项目知识 |
+| **长期记忆** | 重要的用户信息 | 记住用户偏好 |
 
--- 向量表（使用 sqlite-vec）
-CREATE VIRTUAL TABLE chunks_vec USING vec0(
-    chunk_id TEXT PRIMARY KEY,
-    embedding FLOAT[1536]  -- 根据模型维度调整
-);
+### 14.4.2 如何使用记忆
 
--- 全文搜索表
-CREATE VIRTUAL TABLE chunks_fts USING fts5(
-    content,
-    content='chunks',
-    content_rowid='id'
-);
+**自动使用**：
 
--- 嵌入缓存表
-CREATE TABLE embedding_cache (
-    text_hash TEXT PRIMARY KEY,
-    provider_model TEXT NOT NULL,
-    embedding BLOB NOT NULL,
-    created_at INTEGER DEFAULT (unixepoch())
-);
+OpenClaw 会自动：
+1. 保存对话历史到会话记忆
+2. 读取相关的工作区文档
+3. 检索长期记忆中的相关信息
 
--- 同步元数据表
-CREATE TABLE sync_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-```
+**手动管理**：
 
-### 14.3.2 文件分块
+你可以主动管理记忆：
+- 创建笔记文件，AI 会自动读取
+- 标记重要信息，AI 会长期记住
+- 搜索历史对话
 
-```typescript
-// /src/memory/chunking.ts
+### 14.4.3 记忆文件
 
-interface TextChunk {
-  id: string;
-  text: string;
-  startLine: number;
-  endLine: number;
-  tokenCount: number;
-}
+**SOUL.md**：
+- AI 的人格和性格
+- 始终加载，影响 AI 的行为方式
 
-class TextChunker {
-  private maxChunkSize = 1000;  // 最大 Token 数
-  private chunkOverlap = 200;   // 重叠 Token 数
-  
-  chunkDocument(content: string): TextChunk[] {
-    const lines = content.split('\n');
-    const chunks: TextChunk[] = [];
-    
-    let currentChunk: string[] = [];
-    let currentTokens = 0;
-    let startLine = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const lineTokens = this.estimateTokens(line);
-      
-      // 检查是否需要分割
-      if (currentTokens + lineTokens > this.maxChunkSize && currentChunk.length > 0) {
-        // 保存当前块
-        chunks.push(this.createChunk(currentChunk, startLine, i - 1));
-        
-        // 保留重叠部分
-        const overlapLines = this.getOverlapLines(currentChunk);
-        currentChunk = [...overlapLines, line];
-        currentTokens = overlapLines.reduce((sum, l) => 
-          sum + this.estimateTokens(l), 0) + lineTokens;
-        startLine = i - overlapLines.length;
-      } else {
-        currentChunk.push(line);
-        currentTokens += lineTokens;
-      }
-    }
-    
-    // 保存最后一个块
-    if (currentChunk.length > 0) {
-      chunks.push(this.createChunk(currentChunk, startLine, lines.length - 1));
-    }
-    
-    return chunks;
-  }
-  
-  private createChunk(
-    lines: string[],
-    startLine: number,
-    endLine: number
-  ): TextChunk {
-    const text = lines.join('\n');
-    
-    return {
-      id: this.generateChunkId(text),
-      text,
-      startLine: startLine + 1,  // 1-based
-      endLine: endLine + 1,
-      tokenCount: this.estimateTokens(text),
-    };
-  }
-  
-  private getOverlapLines(lines: string[]): string[] {
-    let overlapTokens = 0;
-    const overlapLines: string[] = [];
-    
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const lineTokens = this.estimateTokens(lines[i]);
-      if (overlapTokens + lineTokens <= this.chunkOverlap) {
-        overlapLines.unshift(lines[i]);
-        overlapTokens += lineTokens;
-      } else {
-        break;
-      }
-    }
-    
-    return overlapLines;
-  }
-  
-  private estimateTokens(text: string): number {
-    // 粗略估计：英文约 4 字符/Token，中文约 1.5 字符/Token
-    return Math.ceil(text.length / 3);
-  }
-  
-  private generateChunkId(text: string): string {
-    // 使用文本哈希作为 ID
-    return createHash('sha256').update(text).digest('hex').slice(0, 16);
-  }
-}
+**IDENTITY.md**：
+- AI 的基本信息
+- 始终加载，定义 AI 是谁
 
-// 智能分块：按段落分割
-class SemanticChunker extends TextChunker {
-  chunkDocument(content: string): TextChunk[] {
-    // 按段落分割（空行分隔）
-    const paragraphs = content.split(/\n\s*\n/);
-    const chunks: TextChunk[] = [];
-    
-    let currentChunk: string[] = [];
-    let currentTokens = 0;
-    let startPara = 0;
-    
-    for (let i = 0; i < paragraphs.length; i++) {
-      const para = paragraphs[i].trim();
-      if (!para) continue;
-      
-      const paraTokens = this.estimateTokens(para);
-      
-      if (currentTokens + paraTokens > this.maxChunkSize && currentChunk.length > 0) {
-        chunks.push(this.createChunkFromParagraphs(
-          currentChunk, startPara, i - 1
-        ));
-        
-        currentChunk = [para];
-        currentTokens = paraTokens;
-        startPara = i;
-      } else {
-        currentChunk.push(para);
-        currentTokens += paraTokens;
-      }
-    }
-    
-    if (currentChunk.length > 0) {
-      chunks.push(this.createChunkFromParagraphs(
-        currentChunk, startPara, paragraphs.length - 1
-      ));
-    }
-    
-    return chunks;
-  }
-  
-  private createChunkFromParagraphs(
-    paragraphs: string[],
-    startIdx: number,
-    endIdx: number
-  ): TextChunk {
-    const text = paragraphs.join('\n\n');
-    
-    return {
-      id: this.generateChunkId(text),
-      text,
-      startLine: startIdx + 1,
-      endLine: endIdx + 1,
-      tokenCount: this.estimateTokens(text),
-    };
-  }
-}
-```
+**USER.md**：
+- 用户的信息和偏好
+- 始终加载，让 AI 了解用户
 
-### 14.3.3 索引构建
-
-```typescript
-// /src/memory/indexing.ts
-
-class MemoryIndexer {
-  private db: Database;
-  private provider: EmbeddingProvider;
-  
-  constructor(db: Database, provider: EmbeddingProvider) {
-    this.db = db;
-    this.provider = provider;
-  }
-  
-  async indexFile(filePath: string, content: string): Promise<void> {
-    // 1. 分块
-    const chunker = new SemanticChunker();
-    const chunks = chunker.chunkDocument(content);
-    
-    // 2. 获取嵌入
-    const embeddings = await this.provider.embedBatch(
-      chunks.map(c => c.text)
-    );
-    
-    // 3. 开始事务
-    const transaction = this.db.transaction(() => {
-      // 插入或更新文件记录
-      const fileStmt = this.db.prepare(
-        `INSERT OR REPLACE INTO files (path, source, last_modified, size, checksum)
-         VALUES (?, 'memory', ?, ?, ?)`
-      );
-      
-      const stats = statSync(filePath);
-      const checksum = createHash('sha256').update(content).digest('hex');
-      
-      const fileResult = fileStmt.run(
-        filePath,
-        Math.floor(stats.mtimeMs / 1000),
-        stats.size,
-        checksum
-      );
-      
-      const fileId = fileResult.lastInsertRowid;
-      
-      // 删除旧块
-      this.db.prepare('DELETE FROM chunks WHERE file_id = ?').run(fileId);
-      
-      // 插入新块
-      const chunkStmt = this.db.prepare(
-        `INSERT INTO chunks (id, file_id, content, start_line, end_line, token_count)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      );
-      
-      const vecStmt = this.db.prepare(
-        `INSERT INTO chunks_vec (chunk_id, embedding)
-         VALUES (?, ?)`
-      );
-      
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const embedding = embeddings[i];
-        
-        chunkStmt.run(
-          chunk.id,
-          fileId,
-          chunk.text,
-          chunk.startLine,
-          chunk.endLine,
-          chunk.tokenCount
-        );
-        
-        vecStmt.run(chunk.id, JSON.stringify(embedding));
-      }
-    });
-    
-    transaction();
-    
-    console.log(`Indexed ${filePath}: ${chunks.length} chunks`);
-  }
-  
-  async removeFile(filePath: string): Promise<void> {
-    const file = this.db.prepare(
-      'SELECT id FROM files WHERE path = ?'
-    ).get(filePath);
-    
-    if (!file) return;
-    
-    const transaction = this.db.transaction(() => {
-      // 获取块 ID
-      const chunks = this.db.prepare(
-        'SELECT id FROM chunks WHERE file_id = ?'
-      ).all(file.id);
-      
-      // 删除向量
-      for (const chunk of chunks) {
-        this.db.prepare(
-          'DELETE FROM chunks_vec WHERE chunk_id = ?'
-        ).run(chunk.id);
-      }
-      
-      // 删除块
-      this.db.prepare('DELETE FROM chunks WHERE file_id = ?').run(file.id);
-      
-      // 删除文件记录
-      this.db.prepare('DELETE FROM files WHERE id = ?').run(file.id);
-    });
-    
-    transaction();
-    
-    console.log(`Removed ${filePath} from index`);
-  }
-}
-```
+**memory/*.md**：
+- 工作区记忆文件
+- 自动加载，提供项目知识
 
 ---
 
-## 14.4 记忆检索
+## 14.5 RAG 的实际应用
 
-### 14.4.1 向量检索
+### 14.5.1 基于文档问答
 
-```typescript
-// /src/memory/vector-search.ts
+**场景**：你有一本产品手册，想快速找到答案。
 
-interface VectorSearchResult {
-  chunkId: string;
-  content: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  score: number;
-}
+**使用方法**：
+1. 把产品手册放到工作区
+2. 向 AI 提问
+3. AI 会基于手册内容回答
 
-class VectorSearcher {
-  private db: Database;
-  private provider: EmbeddingProvider;
-  
-  constructor(db: Database, provider: EmbeddingProvider) {
-    this.db = db;
-    this.provider = provider;
-  }
-  
-  async search(
-    query: string,
-    topK: number = 10
-  ): Promise<VectorSearchResult[]> {
-    // 1. 获取查询向量
-    const queryVector = await this.provider.embedQuery(query);
-    
-    // 2. 向量相似度搜索
-    const results = this.db.prepare(
-      `SELECT 
-        c.id,
-        c.content,
-        f.path,
-        c.start_line,
-        c.end_line,
-        vec_distance_L2(cv.embedding, ?) as distance
-      FROM chunks_vec cv
-      JOIN chunks c ON cv.chunk_id = c.id
-      JOIN files f ON c.file_id = f.id
-      ORDER BY distance
-      LIMIT ?`
-    ).all(JSON.stringify(queryVector), topK);
-    
-    // 3. 转换为相似度分数（距离越小越相似）
-    return results.map((r: any) => ({
-      chunkId: r.id,
-      content: r.content,
-      path: r.path,
-      startLine: r.start_line,
-      endLine: r.end_line,
-      score: 1 / (1 + r.distance),  // 转换为 0-1 分数
-    }));
-  }
-}
-```
+**示例**：
 
-### 14.4.2 全文检索
+> 你：这个产品支持哪些支付方式？
+> 
+> AI：（检索产品手册）
+> AI：根据产品手册，支持以下支付方式：
+> - 微信支付
+> - 支付宝
+> - 银行卡
+> - Apple Pay
 
-```typescript
-// /src/memory/fulltext-search.ts
+### 14.5.2 代码知识库
 
-interface FullTextSearchResult {
-  chunkId: string;
-  content: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  score: number;
-}
+**场景**：你有一个代码项目，想查询代码结构。
 
-class FullTextSearcher {
-  private db: Database;
-  
-  constructor(db: Database) {
-    this.db = db;
-  }
-  
-  search(query: string, topK: number = 10): FullTextSearchResult[] {
-    // 构建 FTS 查询
-    const ftsQuery = this.buildFtsQuery(query);
-    
-    const results = this.db.prepare(
-      `SELECT 
-        c.id,
-        c.content,
-        f.path,
-        c.start_line,
-        c.end_line,
-        rank as score
-      FROM chunks_fts fts
-      JOIN chunks c ON fts.rowid = c.id
-      JOIN files f ON c.file_id = f.id
-      WHERE chunks_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?`
-    ).all(ftsQuery, topK);
-    
-    return results.map((r: any) => ({
-      chunkId: r.id,
-      content: r.content,
-      path: r.path,
-      startLine: r.start_line,
-      endLine: r.end_line,
-      score: this.bm25ToScore(r.score),
-    }));
-  }
-  
-  private buildFtsQuery(query: string): string {
-    // 提取关键词
-    const tokens = query
-      .toLowerCase()
-      .match(/[\w\u4e00-\u9fa5]+/g) || [];
-    
-    // 构建 AND 查询
-    return tokens
-      .map(t => `"${t}"`)
-      .join(' AND ');
-  }
-  
-  private bm25ToScore(bm25Rank: number): number {
-    // BM25 排名转换为相似度分数
-    return 1 / (1 + Math.max(0, bm25Rank));
-  }
-}
-```
+**使用方法**：
+1. 把代码文档放到工作区
+2. 询问代码相关问题
+3. AI 基于代码库回答
 
-### 14.4.3 混合检索
+**示例**：
 
-```typescript
-// /src/memory/hybrid-search.ts
+> 你：这个项目的入口文件在哪里？
+> 
+> AI：（检索项目文档）
+> AI：入口文件是 src/index.ts，它负责初始化应用和启动服务器。
 
-interface HybridSearchResult {
-  chunkId: string;
-  content: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  score: number;
-  vectorScore: number;
-  textScore: number;
-}
+### 14.5.3 个人知识管理
 
-class HybridSearcher {
-  private vectorSearcher: VectorSearcher;
-  private textSearcher: FullTextSearcher;
-  
-  constructor(
-    vectorSearcher: VectorSearcher,
-    textSearcher: FullTextSearcher
-  ) {
-    this.vectorSearcher = vectorSearcher;
-    this.textSearcher = textSearcher;
-  }
-  
-  async search(
-    query: string,
-    options: {
-      topK?: number;
-      vectorWeight?: number;
-      textWeight?: number;
-      minScore?: number;
-    } = {}
-  ): Promise<HybridSearchResult[]> {
-    const {
-      topK = 10,
-      vectorWeight = 0.7,
-      textWeight = 0.3,
-      minScore = 0.3,
-    } = options;
-    
-    // 并行执行两种搜索
-    const [vectorResults, textResults] = await Promise.all([
-      this.vectorSearcher.search(query, topK * 2),
-      this.textSearcher.search(query, topK * 2),
-    ]);
-    
-    // 合并结果
-    const merged = this.mergeResults(
-      vectorResults,
-      textResults,
-      vectorWeight,
-      textWeight
-    );
-    
-    // 过滤和排序
-    return merged
-      .filter(r => r.score >= minScore)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK);
-  }
-  
-  private mergeResults(
-    vectorResults: VectorSearchResult[],
-    textResults: FullTextSearchResult[],
-    vectorWeight: number,
-    textWeight: number
-  ): HybridSearchResult[] {
-    const results = new Map<string, HybridSearchResult>();
-    
-    // 添加向量搜索结果
-    for (const r of vectorResults) {
-      results.set(r.chunkId, {
-        chunkId: r.chunkId,
-        content: r.content,
-        path: r.path,
-        startLine: r.startLine,
-        endLine: r.endLine,
-        vectorScore: r.score,
-        textScore: 0,
-        score: r.score * vectorWeight,
-      });
-    }
-    
-    // 添加/合并全文搜索结果
-    for (const r of textResults) {
-      const existing = results.get(r.chunkId);
-      
-      if (existing) {
-        existing.textScore = r.score;
-        existing.score += r.score * textWeight;
-      } else {
-        results.set(r.chunkId, {
-          chunkId: r.chunkId,
-          content: r.content,
-          path: r.path,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          vectorScore: 0,
-          textScore: r.score,
-          score: r.score * textWeight,
-        });
-      }
-    }
-    
-    return Array.from(results.values());
-  }
-}
-```
+**场景**：你有很多笔记，想快速找到需要的信息。
+
+**使用方法**：
+1. 把所有笔记放到工作区
+2. 用自然语言搜索
+3. AI 帮你找到相关内容
+
+**示例**：
+
+> 你：我之前记录的关于 Docker 的命令有哪些？
+> 
+> AI：（检索你的笔记）
+> AI：你在笔记中记录了以下 Docker 命令：
+> - docker run：运行容器
+> - docker build：构建镜像
+> - docker-compose up：启动服务
 
 ---
 
-## 14.5 优化与调优
+## 14.6 优化记忆效果
 
-### 14.5.1 分块策略优化
+### 14.6.1 写好记忆文件
 
-```typescript
-// 不同文档类型的分块策略
-const chunkingStrategies: Record<string, ChunkingConfig> = {
-  // 代码文件
-  code: {
-    maxChunkSize: 800,
-    chunkOverlap: 100,
-    splitBy: 'function',  // 按函数分割
-  },
-  
-  // 文档
-  documentation: {
-    maxChunkSize: 1000,
-    chunkOverlap: 200,
-    splitBy: 'paragraph',  // 按段落分割
-  },
-  
-  // 日志
-  log: {
-    maxChunkSize: 500,
-    chunkOverlap: 50,
-    splitBy: 'entry',  // 按条目分割
-  },
-  
-  // 对话
-  conversation: {
-    maxChunkSize: 600,
-    chunkOverlap: 100,
-    splitBy: 'turn',  // 按轮次分割
-  },
-};
+**建议一：结构清晰**
 
-function getChunkingStrategy(filePath: string): ChunkingConfig {
-  const ext = extname(filePath).toLowerCase();
-  
-  if (['.js', '.ts', '.py', '.java', '.cpp'].includes(ext)) {
-    return chunkingStrategies.code;
-  }
-  
-  if (['.md', '.txt', '.rst'].includes(ext)) {
-    return chunkingStrategies.documentation;
-  }
-  
-  if (['.log'].includes(ext)) {
-    return chunkingStrategies.log;
-  }
-  
-  return chunkingStrategies.documentation;
-}
+使用标题、列表、表格组织内容：
+
+> ## 项目架构
+> 
+> ### 前端
+> - React + TypeScript
+> - 使用 Ant Design 组件库
+> 
+003e ### 后端
+> - Node.js + Express
+> - 数据库：PostgreSQL
+
+**建议二：内容完整**
+
+每个概念都要有解释：
+
+> ❌ 不好的写法：
+> 使用 Docker 部署。
+> 
+> ✅ 好的写法：
+> ## Docker 部署
+> 
+> 使用 Docker 可以简化部署流程。
+> 
+> 步骤：
+> 1. 安装 Docker
+> 2. 运行 `docker-compose up`
+> 3. 访问 http://localhost:3000
+
+**建议三：及时更新**
+
+知识变化时，更新记忆文件：
+- 项目架构变了，更新文档
+- 新增功能，添加说明
+- 废弃的功能，标记删除
+
+### 14.6.2 组织记忆文件
+
+**按主题分类**：
+
+```
+memory/
+├── 项目架构.md
+├── API文档.md
+├── 部署指南.md
+├── 常见问题.md
+└── 会议记录/
+    ├── 2024-01-15.md
+    └── 2024-01-22.md
 ```
 
-### 14.5.2 相似度阈值调优
+**使用有意义的文件名**：
 
-```typescript
-// 自适应阈值
-class AdaptiveThreshold {
-  private history: number[] = [];
-  private windowSize = 20;
-  
-  update(score: number): void {
-    this.history.push(score);
-    if (this.history.length > this.windowSize) {
-      this.history.shift();
-    }
-  }
-  
-  getThreshold(): number {
-    if (this.history.length < 5) {
-      return 0.3;  // 默认值
-    }
-    
-    const mean = this.history.reduce((a, b) => a + b) / this.history.length;
-    const std = Math.sqrt(
-      this.history.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) /
-      this.history.length
-    );
-    
-    // 阈值 = 均值 - 0.5 * 标准差
-    return Math.max(0.2, mean - 0.5 * std);
-  }
-}
-```
+> ❌ 不好的命名：
+003e - doc1.md
+> - note.md
+> 
+> ✅ 好的命名：
+> - 数据库设计.md
+> - 用户认证流程.md
 
-### 14.5.3 缓存策略
+### 14.6.3 检索技巧
 
-```typescript
-// 嵌入缓存
-class EmbeddingCache {
-  private cache = new Map<string, CacheEntry>();
-  private maxSize = 10000;
-  private ttl = 7 * 24 * 60 * 60 * 1000;  // 7天
-  
-  async get(text: string, provider: string): Promise<number[] | null> {
-    const key = this.generateKey(text, provider);
-    const entry = this.cache.get(key);
-    
-    if (!entry) {
-      // 尝试从数据库加载
-      const dbEntry = await this.loadFromDB(key);
-      if (dbEntry) {
-        this.cache.set(key, dbEntry);
-        return dbEntry.embedding;
-      }
-      return null;
-    }
-    
-    // 检查是否过期
-    if (Date.now() - entry.timestamp > this.ttl) {
-      this.cache.delete(key);
-      return null;
-    }
-    
-    return entry.embedding;
-  }
-  
-  async set(
-    text: string,
-    provider: string,
-    embedding: number[]
-  ): Promise<void> {
-    const key = this.generateKey(text, provider);
-    
-    // LRU 淘汰
-    if (this.cache.size >= this.maxSize) {
-      const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
-    }
-    
-    const entry: CacheEntry = {
-      embedding,
-      timestamp: Date.now(),
-    };
-    
-    this.cache.set(key, entry);
-    
-    // 异步保存到数据库
-    await this.saveToDB(key, entry);
-  }
-  
-  private generateKey(text: string, provider: string): string {
-    const hash = createHash('sha256').update(text).digest('hex');
-    return `${provider}:${hash}`;
-  }
-}
-```
+**提问要具体**：
+
+> ❌ 太笼统：
+> 告诉我关于这个项目的信息。
+> 
+> ✅ 具体明确：
+> 这个项目的后端使用什么数据库？
+
+**使用关键词**：
+
+> 在提问中包含关键概念：
+> - "Docker 部署" 而不是 "怎么运行"
+> - "API 认证" 而不是 "怎么登录"
 
 ---
 
-## 本章小结
+## 14.7 本章小结
 
-通过本章的学习，你应该掌握了：
+### 核心要点
 
-1. **RAG 概述** - 什么是 RAG、OpenClaw 记忆架构
-2. **嵌入模型** - 嵌入原理、模型选择、批量优化
-3. **记忆存储** - 数据库设计、文件分块、索引构建
-4. **记忆检索** - 向量检索、全文检索、混合检索
-5. **优化调优** - 分块策略、阈值调优、缓存策略
+1. **为什么需要记忆**
+   - 短期记忆：保持对话连贯
+   - 长期记忆：积累知识和经验
+
+2. **什么是 RAG**
+   - 检索 + 增强 + 生成
+   - 先查资料，再回答
+   - 更准确、可溯源
+
+3. **向量是什么**
+   - 文字转换成数字
+   - 语义相似的向量也相似
+   - 用于模糊匹配
+
+4. **OpenClaw 记忆系统**
+   - 会话记忆、工作区记忆、长期记忆
+   - 自动保存和检索
+   - 支持文档问答
+
+5. **优化记忆效果**
+   - 写好记忆文件（结构清晰、内容完整）
+   - 组织好文件结构
+   - 提问要具体
+
+### 类比总结
+
+| 概念 | 类比 | 作用 |
+|------|------|------|
+| RAG | 开卷考试 | 查资料再回答 |
+| 向量 | 语义坐标 | 找到相似内容 |
+| 记忆文件 | 笔记本 | 存储知识 |
+| 检索 | 查字典 | 快速找到信息 |
+
+### 下一步
+
+在下一章，我们将学习 **媒体理解**：
+- AI 如何理解图片
+- AI 如何处理语音
+- 多模态交互
 
 ---
 
-*下一章：第 15 章 媒体理解*
+## 参考资源
+
+- OpenClaw 记忆系统文档
+- RAG 最佳实践
+- 向量数据库介绍
