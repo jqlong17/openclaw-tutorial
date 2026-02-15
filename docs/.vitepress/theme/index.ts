@@ -7,13 +7,12 @@ export default {
   Layout() {
     return h(DefaultTheme.Layout, null, {
       'doc-after': () => h('div', { class: 'giscus-wrapper' }, [
-        h('div', { class: 'giscus' }),
         h('script', {
           src: 'https://giscus.app/client.js',
           'data-repo': 'jqlong17/openclaw-tutorial',
-          'data-repo-id': 'R_kgDOOG某某某某',
-          'data-category': 'Comments',
-          'data-category-id': 'DIC_kwDOOG某某某某',
+          'data-repo-id': 'R_kgDORQtucA',
+          'data-category': 'General',
+          'data-category-id': 'DIC_kwDORQtucM4C2fme',
           'data-mapping': 'pathname',
           'data-strict': '0',
           'data-reactions-enabled': '1',
