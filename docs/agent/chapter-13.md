@@ -1,1085 +1,436 @@
 # 第 13 章：工具系统
 
-> 本章将深入解析 OpenClaw 的工具系统，包括工具的定义、实现、注册和调用机制。
+> 本章将讲解 OpenClaw 的工具系统，包括工具的概念、类型和使用方式。
 
 ---
 
-## 13.1 工具概述
+## 13.1 什么是工具？
 
-### 13.1.1 什么是工具
+### 13.1.1 工具的作用
 
-工具（Tools）是 AI Agent 调用外部功能的方式，让 AI 能够：
+**AI 模型的局限**：
 
-- 执行代码
-- 访问文件系统
-- 查询数据库
-- 调用外部 API
-- 控制浏览器
-- 等等
+AI 模型虽然聪明，但它：
+- ❌ 不能访问互联网
+- ❌ 不能读取你的本地文件
+- ❌ 不能执行代码
+- ❌ 不能操作浏览器
 
-```mermaid
-graph LR
-    A[用户提问] --> B[AI思考]
-    B --> C{需要工具?}
-    C -->|是| D[调用工具]
-    D --> E[获取结果]
-    E --> B
-    C -->|否| F[直接回答]
-```
+**工具的桥梁作用**：
 
-### 13.1.2 工具 vs 技能
+工具让 AI 能够**做实事**，把 AI 的"想法"变成"行动"。
 
-| 特性 | 工具（Tools） | 技能（Skills） |
-|------|--------------|---------------|
-| **粒度** | 单一功能 | 功能集合 |
-| **定义** | JSON Schema | 代码包 |
-| **安装** | 内置或代码 | 独立安装 |
-| **示例** | 文件读取、网络请求 | Git 管理、Docker 操作 |
+**类比理解**：
 
-### 13.1.3 工具分类
+想象 AI 是一个**大脑**：
+- 它能思考、规划、决策
+- 但它没有手，不能实际操作
 
-OpenClaw 内置工具分类：
+工具就是**手**：
+- 读取文件 = 用手翻开书本
+- 执行代码 = 用手操作电脑
+- 发送邮件 = 用手写好信封寄出
 
-| 类别 | 工具 | 说明 |
+### 13.1.2 实际例子
+
+**场景：查询天气**
+
+没有工具时：
+> 你：北京今天天气怎么样？
+> AI：抱歉，我无法获取实时天气信息。
+
+有工具时：
+> 你：北京今天天气怎么样？
+> AI：让我查一下...
+> （调用天气查询工具）
+> AI：北京今天晴朗，25°C，适合外出！
+
+**场景：读取文件**
+
+没有工具时：
+> 你：帮我看看 config.json 里写了什么
+> AI：抱歉，我无法访问你的本地文件。
+
+有工具时：
+> 你：帮我看看 config.json 里写了什么
+> AI：好的，让我读取一下...
+> （调用文件读取工具）
+> AI：config.json 里配置了：
+> - 模型：GPT-4
+> - 语言：中文
+> - 调试模式：开启
+
+---
+
+## 13.2 工具的类型
+
+### 13.2.1 按功能分类
+
+OpenClaw 提供了丰富的内置工具：
+
+| 类别 | 工具示例 | 用途 |
+|------|---------|------|
+| **文件操作** | 读取文件、写入文件、列出目录 | 管理本地文件 |
+| **代码执行** | 执行 Python、执行 Shell 命令 | 运行代码 |
+| **网络请求** | 网页搜索、获取网页内容 | 访问互联网 |
+| **浏览器** | 打开网页、点击元素、输入文字 | 自动化浏览器 |
+| **媒体处理** | 读取图片、转录语音 | 处理多媒体 |
+| **系统操作** | 执行系统命令、查看系统信息 | 控制系统 |
+
+### 13.2.2 按使用方式分类
+
+**同步工具**：
+- 立即执行，立即返回结果
+- 比如：读取文件、查询天气
+- 适合快速操作
+
+**异步工具**：
+- 执行时间较长，需要等待
+- 比如：下载大文件、批量处理数据
+- 适合耗时操作
+
+### 13.2.3 工具 vs 技能
+
+你可能还听说过"技能（Skills）"，两者有什么区别？
+
+| 对比项 | 工具（Tools） | 技能（Skills） |
+|--------|--------------|---------------|
+| **粒度** | 单一功能 | 多个功能的组合 |
+| **复杂度** | 简单、专注 | 复杂、完整 |
+| **例子** | 读取文件、发送邮件 | Git 管理、Docker 操作 |
+| **安装** | 内置或简单配置 | 需要独立安装 |
+
+**类比**：
+- **工具** = 单个工具（螺丝刀、锤子）
+- **技能** = 工具箱（包含多种工具的完整套装）
+
+---
+
+## 13.3 工具的工作原理
+
+### 13.3.1 AI 如何决定使用工具？
+
+**决策流程**：
+
+1. **用户提问**
+   > 你：帮我查一下 OpenClaw 的 GitHub 仓库有多少 Star？
+
+2. **AI 分析**
+   - 理解意图：需要查询 GitHub 数据
+   - 判断能力：我自己不知道实时数据
+   - 选择工具：需要网络请求工具
+
+3. **调用工具**
+   - AI 生成工具调用请求
+   - 系统执行工具
+   - 获取结果
+
+4. **生成回复**
+   - AI 根据工具结果组织语言
+   - 返回给用户
+
+**实际过程**：
+
+> 你：帮我查一下 OpenClaw 的 GitHub 仓库有多少 Star？
+> 
+> AI 思考：这需要访问 GitHub API，我应该使用网络请求工具。
+> 
+> AI 调用工具：
+> - 工具：web_search
+> - 参数：query="OpenClaw GitHub stars"
+> 
+> 工具返回：OpenClaw 仓库有 1,234 Star
+> 
+> AI 回复：OpenClaw 的 GitHub 仓库目前有 1,234 个 Star！
+
+### 13.3.2 工具调用的参数
+
+**参数是什么？**
+
+参数就是告诉工具具体要做什么的详细信息。
+
+**示例：天气查询工具**
+
+需要的参数：
+| 参数 | 说明 | 示例 |
 |------|------|------|
-| **文件** | read_file, write_file | 文件读写 |
-| **代码** | execute_code | 代码执行 |
-| **网络** | web_search, fetch_url | 网络请求 |
-| **浏览器** | browser_open, browser_click | 浏览器控制 |
-| **系统** | execute_command | 系统命令 |
-| **媒体** | read_image, transcribe_audio | 媒体处理 |
+| city | 城市名称 | "北京" |
+| date | 日期 | "今天"、"明天" |
+
+AI 会自动提取：
+> 你：明天上海天气怎么样？
+> 
+> AI 提取参数：
+> - city: "上海"
+> - date: "明天"
+
+**示例：文件读取工具**
+
+需要的参数：
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| file_path | 文件路径 | "/Users/docs/readme.md" |
+| limit | 读取行数 | 50（可选） |
+
+AI 会自动理解：
+> 你：看看 readme.md 的前 50 行
+> 
+> AI 提取参数：
+> - file_path: "readme.md"
+> - limit: 50
+
+### 13.3.3 错误处理
+
+**工具执行失败怎么办？**
+
+**场景一：文件不存在**
+
+> 你：读取不存在的文件.txt
+> 
+> 工具返回错误：文件不存在
+> 
+> AI 回复：抱歉，找不到 "不存在的文件.txt"，请确认文件路径是否正确。
+
+**场景二：网络超时**
+
+> 你：查询某个网站
+> 
+> 工具返回错误：连接超时
+> 
+> AI 回复：抱歉，无法访问该网站，可能是网络问题或网站不可用。
+
+**场景三：权限不足**
+
+> 你：删除系统文件
+> 
+> 工具返回错误：权限不足
+> 
+> AI 回复：抱歉，我没有权限执行这个操作。
 
 ---
 
-## 13.2 工具定义
+## 13.4 常用工具介绍
 
-### 13.2.1 JSON Schema 定义
+### 13.4.1 文件操作工具
 
-工具使用 JSON Schema 定义接口：
+**读取文件（read_file）**
 
-```typescript
-// /src/agents/tools/types.ts
+用途：读取本地文件内容
 
-interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: {
-    type: 'object';
-    properties: Record<string, ParameterSchema>;
-    required?: string[];
-  };
-}
+使用场景：
+- 查看配置文件
+- 阅读代码
+- 查看日志
 
-interface ParameterSchema {
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description: string;
-  enum?: unknown[];
-  items?: ParameterSchema;
-  properties?: Record<string, ParameterSchema>;
-}
+示例：
+> 你：帮我看看 package.json 里有什么依赖
+> AI：（调用 read_file 读取 package.json）
+> AI：package.json 中的依赖包括：express、lodash、axios...
 
-// 示例：文件读取工具
-const readFileTool: ToolDefinition = {
-  name: 'read_file',
-  description: '读取文件内容',
-  parameters: {
-    type: 'object',
-    properties: {
-      file_path: {
-        type: 'string',
-        description: '要读取的文件路径',
-      },
-      offset: {
-        type: 'number',
-        description: '起始行号（可选）',
-      },
-      limit: {
-        type: 'number',
-        description: '读取行数（可选）',
-      },
-    },
-    required: ['file_path'],
-  },
-};
+**写入文件（write_file）**
 
-// 示例：网络搜索工具
-const webSearchTool: ToolDefinition = {
-  name: 'web_search',
-  description: '搜索网络信息',
-  parameters: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: '搜索关键词',
-      },
-      count: {
-        type: 'number',
-        description: '返回结果数量',
-        enum: [5, 10, 20],
-      },
-    },
-    required: ['query'],
-  },
-};
-```
+用途：创建或修改文件
 
-### 13.2.2 参数类型详解
+使用场景：
+- 创建新文件
+- 修改配置
+- 保存数据
 
-```typescript
-// 字符串参数
-const stringParam: ParameterSchema = {
-  type: 'string',
-  description: '文件路径',
-  minLength: 1,
-  maxLength: 255,
-  pattern: '^[\\w\\-\\.\\/]+$',
-};
+示例：
+> 你：创建一个 hello.txt，内容是 "Hello World"
+> AI：（调用 write_file 创建文件）
+> AI：已创建 hello.txt，内容为 "Hello World"
 
-// 数值参数
-const numberParam: ParameterSchema = {
-  type: 'number',
-  description: '超时时间（秒）',
-  minimum: 1,
-  maximum: 300,
-  default: 30,
-};
+### 13.4.2 代码执行工具
 
-// 布尔参数
-const booleanParam: ParameterSchema = {
-  type: 'boolean',
-  description: '是否递归',
-  default: false,
-};
+**执行代码（execute_code）**
 
-// 枚举参数
-const enumParam: ParameterSchema = {
-  type: 'string',
-  description: '排序方式',
-  enum: ['asc', 'desc', 'none'],
-  default: 'none',
-};
+用途：运行代码并获取结果
 
-// 数组参数
-const arrayParam: ParameterSchema = {
-  type: 'array',
-  description: '文件列表',
-  items: {
-    type: 'string',
-    description: '文件路径',
-  },
-  minItems: 1,
-  maxItems: 10,
-};
+使用场景：
+- 计算复杂公式
+- 数据处理
+- 快速测试代码
 
-// 对象参数
-const objectParam: ParameterSchema = {
-  type: 'object',
-  description: '配置选项',
-  properties: {
-    encoding: {
-      type: 'string',
-      enum: ['utf8', 'base64'],
-    },
-    timeout: {
-      type: 'number',
-    },
-  },
-};
-```
+示例：
+> 你：计算 123 的平方根
+> AI：（调用 execute_code 计算）
+> AI：123 的平方根约等于 11.09
 
-### 13.2.3 描述编写技巧
+**执行命令（execute_command）**
 
-```typescript
-// 好的描述示例
-const goodTools: ToolDefinition[] = [
-  {
-    name: 'calculate',
-    description: `
-      执行数学计算。
-      支持基本运算：+、-、*、/、^（幂）、sqrt（平方根）
-      示例："2 + 3 * 4"、"sqrt(16)"、"2^10"
-    `.trim(),
-    parameters: {
-      type: 'object',
-      properties: {
-        expression: {
-          type: 'string',
-          description: '数学表达式，如 "2 + 3"',
-        },
-      },
-      required: ['expression'],
-    },
-  },
-  {
-    name: 'send_email',
-    description: `
-      发送电子邮件。
-      注意：
-      1. 收件人地址必须有效
-      2. 主题不能为空
-      3. 邮件内容支持纯文本或 HTML
-    `.trim(),
-    parameters: {
-      type: 'object',
-      properties: {
-        to: {
-          type: 'string',
-          description: '收件人邮箱地址',
-        },
-        subject: {
-          type: 'string',
-          description: '邮件主题',
-        },
-        body: {
-          type: 'string',
-          description: '邮件正文',
-        },
-        is_html: {
-          type: 'boolean',
-          description: '是否为 HTML 格式',
-          default: false,
-        },
-      },
-      required: ['to', 'subject', 'body'],
-    },
-  },
-];
-```
+用途：执行系统命令
+
+使用场景：
+- 查看系统信息
+- 运行脚本
+- 管理系统
+
+示例：
+> 你：查看当前目录下有哪些文件
+> AI：（调用 execute_command 执行 ls）
+> AI：当前目录下有：docs、src、package.json、README.md
+
+### 13.4.3 网络工具
+
+**网页搜索（web_search）**
+
+用途：搜索互联网信息
+
+使用场景：
+- 查询最新资讯
+- 查找技术文档
+- 了解实时信息
+
+示例：
+> 你：搜索 OpenClaw 的最新版本
+> AI：（调用 web_search）
+> AI：OpenClaw 最新版本是 v2.5.0，发布于 2024年1月...
+
+**获取网页（fetch_url）**
+
+用途：获取指定网页的内容
+
+使用场景：
+- 读取文章
+- 查看文档
+- 获取特定页面信息
+
+示例：
+> 你：获取 https://example.com 的内容
+> AI：（调用 fetch_url）
+> AI：该网页的主要内容是...
+
+### 13.4.4 浏览器工具
+
+**打开网页（browser_open）**
+
+用途：在浏览器中打开网页
+
+使用场景：
+- 自动化测试
+- 网页截图
+- 数据抓取
+
+**点击元素（browser_click）**
+
+用途：模拟点击网页元素
+
+使用场景：
+- 自动化操作
+- 表单填写
+- 导航页面
+
+**输入文字（browser_type）**
+
+用途：在输入框中输入文字
+
+使用场景：
+- 自动登录
+- 搜索内容
+- 填写表单
 
 ---
 
-## 13.3 工具实现
+## 13.5 工具的安全使用
 
-### 13.3.1 同步工具
+### 13.5.1 权限控制
 
-```typescript
-// /src/agents/tools/implementations/read-file.ts
+**为什么需要权限控制？**
 
-import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+工具很强大，但也可能危险：
+- 误删重要文件
+- 执行恶意代码
+- 泄露敏感信息
 
-interface ReadFileParams {
-  file_path: string;
-  offset?: number;
-  limit?: number;
-}
+**安全措施**：
 
-interface ReadFileResult {
-  content: string;
-  total_lines: number;
-  read_lines: number;
-}
+1. **文件访问限制**
+   - 只能访问指定目录
+   - 不能访问系统关键文件
 
-export function readFileTool(): Tool {
-  return {
-    definition: {
-      name: 'read_file',
-      description: '读取文件内容，支持指定行范围',
-      parameters: {
-        type: 'object',
-        properties: {
-          file_path: {
-            type: 'string',
-            description: '文件路径（相对或绝对）',
-          },
-          offset: {
-            type: 'number',
-            description: '起始行号（1-based，可选）',
-          },
-          limit: {
-            type: 'number',
-            description: '读取行数（可选）',
-          },
-        },
-        required: ['file_path'],
-      },
-    },
-    
-    async execute(params: ReadFileParams): Promise<ReadFileResult> {
-      // 安全检查：解析并验证路径
-      const resolvedPath = resolve(params.file_path);
-      const workspacePath = resolve(process.cwd());
-      
-      if (!resolvedPath.startsWith(workspacePath)) {
-        throw new Error('Access denied: path outside workspace');
-      }
-      
-      // 读取文件
-      const content = await readFile(resolvedPath, 'utf-8');
-      const lines = content.split('\n');
-      
-      // 应用行范围
-      const offset = (params.offset || 1) - 1;
-      const limit = params.limit || lines.length;
-      
-      const selectedLines = lines.slice(offset, offset + limit);
-      
-      return {
-        content: selectedLines.join('\n'),
-        total_lines: lines.length,
-        read_lines: selectedLines.length,
-      };
-    },
-  };
-}
-```
+2. **命令执行限制**
+   - 禁止危险命令（rm -rf /）
+   - 限制执行时间
 
-### 13.3.2 异步工具
+3. **网络访问限制**
+   - 限制可访问的域名
+   - 防止访问恶意网站
 
-```typescript
-// /src/agents/tools/implementations/web-search.ts
+### 13.5.2 用户确认
 
-interface WebSearchParams {
-  query: string;
-  count?: number;
-}
+**敏感操作需要确认**：
 
-interface WebSearchResult {
-  results: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-  }>;
-}
+对于危险操作，系统会要求用户确认：
 
-export function webSearchTool(apiKey: string): Tool {
-  return {
-    definition: {
-      name: 'web_search',
-      description: '搜索网络信息',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: '搜索关键词',
-          },
-          count: {
-            type: 'number',
-            description: '返回结果数量（默认10）',
-            default: 10,
-          },
-        },
-        required: ['query'],
-      },
-    },
-    
-    async execute(params: WebSearchParams): Promise<WebSearchResult> {
-      const response = await fetch(
-        'https://api.search.com/v1/search',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            q: params.query,
-            num: params.count || 10,
-          }),
-        }
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        results: data.results.map((r: any) => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.snippet,
-        })),
-      };
-    },
-  };
-}
-```
+> AI：我即将删除文件 "old-data.txt"，确认吗？
+> 
+> 你：确认
+> AI：（执行删除）
+> AI：文件已删除
 
-### 13.3.3 流式工具
+### 13.5.3 最佳实践
 
-```typescript
-// /src/agents/tools/implementations/execute-command.ts
+**给用户的建议**：
 
-import { spawn } from 'child_process';
-import { Readable } from 'stream';
+1. **了解工具的能力**
+   - 知道 AI 能做什么
+   - 知道 AI 不能做什么
 
-interface ExecuteCommandParams {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  timeout?: number;
-}
+2. **谨慎授权**
+   - 不要随意给予高权限
+   - 定期检查权限设置
 
-interface ExecuteCommandResult {
-  exit_code: number;
-  stdout: string;
-  stderr: string;
-}
-
-export function executeCommandTool(): Tool {
-  return {
-    definition: {
-      name: 'execute_command',
-      description: '执行系统命令（带安全限制）',
-      parameters: {
-        type: 'object',
-        properties: {
-          command: {
-            type: 'string',
-            description: '命令名称',
-          },
-          args: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '命令参数',
-          },
-          cwd: {
-            type: 'string',
-            description: '工作目录',
-          },
-          timeout: {
-            type: 'number',
-            description: '超时时间（秒，默认30）',
-            default: 30,
-          },
-        },
-        required: ['command'],
-      },
-    },
-    
-    async execute(
-      params: ExecuteCommandParams
-    ): Promise<ExecuteCommandResult> {
-      // 安全检查
-      const blockedCommands = ['rm', 'sudo', 'chmod', 'chown'];
-      if (blockedCommands.includes(params.command)) {
-        throw new Error(`Command '${params.command}' is not allowed`);
-      }
-      
-      return new Promise((resolve, reject) => {
-        const child = spawn(params.command, params.args || [], {
-          cwd: params.cwd,
-          timeout: (params.timeout || 30) * 1000,
-        });
-        
-        let stdout = '';
-        let stderr = '';
-        
-        child.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-        
-        child.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-        
-        child.on('close', (code) => {
-          resolve({
-            exit_code: code || 0,
-            stdout: stdout.slice(0, 10000), // 限制输出大小
-            stderr: stderr.slice(0, 10000),
-          });
-        });
-        
-        child.on('error', (error) => {
-          reject(error);
-        });
-      });
-    },
-  };
-}
-```
-
-### 13.3.4 工具组合
-
-```typescript
-// 组合多个工具完成复杂任务
-class ToolComposer {
-  private tools: Tool[];
-  
-  constructor(tools: Tool[]) {
-    this.tools = tools;
-  }
-  
-  // 组合：搜索并下载
-  async searchAndDownload(
-    query: string,
-    downloadDir: string
-  ): Promise<string> {
-    // 1. 搜索
-    const searchTool = this.getTool('web_search');
-    const searchResult = await searchTool.execute({ query, count: 5 });
-    
-    // 2. 获取第一个结果的页面
-    const fetchTool = this.getTool('fetch_url');
-    const page = await fetchTool.execute({
-      url: searchResult.results[0].url,
-    });
-    
-    // 3. 保存到文件
-    const writeTool = this.getTool('write_file');
-    const filename = `search_result_${Date.now()}.html`;
-    await writeTool.execute({
-      file_path: join(downloadDir, filename),
-      content: page.content,
-    });
-    
-    return filename;
-  }
-  
-  private getTool(name: string): Tool {
-    const tool = this.tools.find(t => t.definition.name === name);
-    if (!tool) {
-      throw new Error(`Tool not found: ${name}`);
-    }
-    return tool;
-  }
-}
-```
+3. **备份重要数据**
+   - 在执行删除操作前备份
+   - 重要文件多份保存
 
 ---
 
-## 13.4 工具注册与发现
+## 13.6 本章小结
 
-### 13.4.1 内置工具注册
+### 核心要点
 
-```typescript
-// /src/agents/tools/registry.ts
+1. **工具的作用**
+   - 让 AI 能够做实事
+   - 连接 AI 和外部世界
+   - 把想法变成行动
 
-class ToolRegistry {
-  private tools = new Map<string, Tool>();
-  
-  // 注册内置工具
-  registerBuiltinTools(): void {
-    // 文件操作
-    this.register(readFileTool());
-    this.register(writeFileTool());
-    this.register(listDirectoryTool());
-    
-    // 代码执行
-    this.register(executeCodeTool());
-    this.register(executeCommandTool());
-    
-    // 网络请求
-    this.register(webSearchTool(this.config.searchApiKey));
-    this.register(fetchUrlTool());
-    
-    // 浏览器控制
-    this.register(browserOpenTool());
-    this.register(browserClickTool());
-    this.register(browserTypeTool());
-    
-    // 媒体处理
-    this.register(readImageTool());
-    this.register(transcribeAudioTool());
-  }
-  
-  register(tool: Tool): void {
-    // 验证工具定义
-    this.validateTool(tool);
-    
-    this.tools.set(tool.definition.name, tool);
-    console.log(`Registered tool: ${tool.definition.name}`);
-  }
-  
-  unregister(name: string): void {
-    this.tools.delete(name);
-  }
-  
-  get(name: string): Tool | undefined {
-    return this.tools.get(name);
-  }
-  
-  getAll(): Tool[] {
-    return Array.from(this.tools.values());
-  }
-  
-  getDefinitions(): ToolDefinition[] {
-    return this.getAll().map(t => t.definition);
-  }
-  
-  private validateTool(tool: Tool): void {
-    const def = tool.definition;
-    
-    // 验证必需字段
-    if (!def.name || !def.description) {
-      throw new Error('Tool must have name and description');
-    }
-    
-    // 验证参数定义
-    if (!def.parameters || def.parameters.type !== 'object') {
-      throw new Error('Tool parameters must be an object');
-    }
-    
-    // 验证执行函数
-    if (typeof tool.execute !== 'function') {
-      throw new Error('Tool must have an execute function');
-    }
-  }
-}
-```
+2. **工具的类型**
+   - 文件操作、代码执行、网络请求、浏览器控制
+   - 同步工具、异步工具
+   - 工具 vs 技能
 
-### 13.4.2 技能工具加载
+3. **工作原理**
+   - AI 分析需求 → 选择工具 → 执行 → 返回结果
+   - 自动提取参数
+   - 错误处理机制
 
-```typescript
-// /src/agents/skills/loader.ts
+4. **安全使用**
+   - 权限控制
+   - 敏感操作确认
+   - 最佳实践
 
-class SkillLoader {
-  private registry: ToolRegistry;
-  
-  async loadSkill(skillName: string): Promise<void> {
-    const skillPath = join(
-      this.config.skillsDir,
-      skillName,
-      'index.js'
-    );
-    
-    // 动态加载技能模块
-    const skillModule = await import(skillPath);
-    
-    // 获取技能定义
-    const skill: Skill = skillModule.default;
-    
-    // 验证技能
-    this.validateSkill(skill);
-    
-    // 注册技能中的工具
-    for (const tool of skill.tools) {
-      this.registry.register(tool);
-    }
-    
-    console.log(`Loaded skill: ${skill.name}`);
-  }
-  
-  async loadAllSkills(): Promise<void> {
-    const skillDirs = await readdir(this.config.skillsDir);
-    
-    for (const dir of skillDirs) {
-      try {
-        await this.loadSkill(dir);
-      } catch (error) {
-        console.error(`Failed to load skill ${dir}:`, error);
-      }
-    }
-  }
-  
-  private validateSkill(skill: Skill): void {
-    if (!skill.name || !skill.version) {
-      throw new Error('Skill must have name and version');
-    }
-    
-    if (!Array.isArray(skill.tools)) {
-      throw new Error('Skill must have tools array');
-    }
-  }
-}
+### 类比总结
 
-// 技能定义示例
-interface Skill {
-  name: string;
-  version: string;
-  description: string;
-  tools: Tool[];
-  hooks?: {
-    onInstall?: () => Promise<void>;
-    onUninstall?: () => Promise<void>;
-  };
-}
-```
+| 概念 | 类比 | 作用 |
+|------|------|------|
+| AI 模型 | 大脑 | 思考、决策 |
+| 工具 | 手 | 执行、操作 |
+| 参数 | 指令细节 | 告诉手具体怎么做 |
+| 结果 | 反馈 | 告诉大脑执行效果 |
 
-### 13.4.3 动态工具注册
+### 下一步
 
-```typescript
-// /src/agents/tools/dynamic-registration.ts
-
-class DynamicToolRegistrar {
-  private registry: ToolRegistry;
-  
-  // 从配置动态注册工具
-  async registerFromConfig(config: ToolConfig[]): Promise<void> {
-    for (const toolConfig of config) {
-      const tool = await this.createToolFromConfig(toolConfig);
-      this.registry.register(tool);
-    }
-  }
-  
-  // 从 API 端点创建工具
-  async createApiTool(
-    name: string,
-    endpoint: string,
-    schema: ToolDefinition
-  ): Promise<Tool> {
-    return {
-      definition: schema,
-      
-      async execute(params: unknown) {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(params),
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API call failed: ${response.statusText}`);
-        }
-        
-        return await response.json();
-      },
-    };
-  }
-  
-  // 从数据库加载工具
-  async loadToolsFromDatabase(): Promise<void> {
-    const tools = await db.query('SELECT * FROM custom_tools');
-    
-    for (const toolData of tools) {
-      const tool: Tool = {
-        definition: JSON.parse(toolData.definition),
-        execute: this.createSandboxedExecute(toolData.code),
-      };
-      
-      this.registry.register(tool);
-    }
-  }
-  
-  private createSandboxedExecute(code: string): Function {
-    // 在沙箱中执行工具代码
-    return async (params: unknown) => {
-      const sandbox = {
-        params,
-        fetch,
-        console,
-        // 限制可用的全局对象
-      };
-      
-      const fn = new Function(
-        'sandbox',
-        `with (sandbox) { ${code} }`
-      );
-      
-      return await fn(sandbox);
-    };
-  }
-}
-```
+在下一章，我们将学习 **记忆系统（RAG）**：
+- 如何让 AI 记住长期信息
+- 向量数据库的工作原理
+- 检索增强生成（RAG）
 
 ---
 
-## 13.5 开发自定义工具
+## 参考资源
 
-### 13.5.1 工具开发流程
-
-```
-1. 需求分析
-   └── 确定工具功能和使用场景
-
-2. 接口设计
-   └── 定义参数和返回值
-
-3. 实现功能
-   └── 编写工具代码
-
-4. 添加测试
-   └── 单元测试和集成测试
-
-5. 编写文档
-   └── 使用说明和示例
-
-6. 注册工具
-   └── 添加到工具注册表
-```
-
-### 13.5.2 天气查询工具示例
-
-```typescript
-// /src/agents/tools/implementations/weather.ts
-
-interface WeatherParams {
-  city: string;
-  days?: number;
-}
-
-interface WeatherResult {
-  city: string;
-  current: {
-    temperature: number;
-    condition: string;
-    humidity: number;
-    wind_speed: number;
-  };
-  forecast: Array<{
-    date: string;
-    high: number;
-    low: number;
-    condition: string;
-  }>;
-}
-
-export function weatherTool(apiKey: string): Tool {
-  return {
-    definition: {
-      name: 'get_weather',
-      description: '获取指定城市的天气信息',
-      parameters: {
-        type: 'object',
-        properties: {
-          city: {
-            type: 'string',
-            description: '城市名称，如 "北京"、"Shanghai"',
-          },
-          days: {
-            type: 'number',
-            description: '预报天数（1-7天，默认3天）',
-            minimum: 1,
-            maximum: 7,
-            default: 3,
-          },
-        },
-        required: ['city'],
-      },
-    },
-    
-    async execute(params: WeatherParams): Promise<WeatherResult> {
-      // 调用天气 API
-      const response = await fetch(
-        `https://api.weather.com/v1/current?city=${encodeURIComponent(params.city)}`,
-        {
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        }
-      );
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`City not found: ${params.city}`);
-        }
-        throw new Error(`Weather API error: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        city: data.location.name,
-        current: {
-          temperature: data.current.temp_c,
-          condition: data.current.condition.text,
-          humidity: data.current.humidity,
-          wind_speed: data.current.wind_kph,
-        },
-        forecast: data.forecast.forecastday.map((day: any) => ({
-          date: day.date,
-          high: day.day.maxtemp_c,
-          low: day.day.mintemp_c,
-          condition: day.day.condition.text,
-        })),
-      };
-    },
-  };
-}
-
-// 测试
-describe('weatherTool', () => {
-  it('should return weather for a valid city', async () => {
-    const tool = weatherTool('test-api-key');
-    
-    const result = await tool.execute({ city: 'Beijing' });
-    
-    expect(result.city).toBe('Beijing');
-    expect(result.current).toHaveProperty('temperature');
-    expect(result.forecast).toHaveLength(3);
-  });
-  
-  it('should throw error for invalid city', async () => {
-    const tool = weatherTool('test-api-key');
-    
-    await expect(
-      tool.execute({ city: 'InvalidCity123' })
-    ).rejects.toThrow('City not found');
-  });
-});
-```
-
-### 13.5.3 数据库查询工具
-
-```typescript
-// /src/agents/tools/implementations/database.ts
-
-interface QueryDatabaseParams {
-  connection: string;
-  query: string;
-  params?: unknown[];
-}
-
-interface QueryDatabaseResult {
-  rows: unknown[];
-  rowCount: number;
-  columns: string[];
-}
-
-export function queryDatabaseTool(): Tool {
-  return {
-    definition: {
-      name: 'query_database',
-      description: '执行 SQL 查询（只读）',
-      parameters: {
-        type: 'object',
-        properties: {
-          connection: {
-            type: 'string',
-            description: '数据库连接名称',
-            enum: ['main', 'analytics', 'readonly'],
-          },
-          query: {
-            type: 'string',
-            description: 'SQL 查询语句（仅 SELECT）',
-          },
-          params: {
-            type: 'array',
-            description: '查询参数（可选）',
-            items: { type: 'string' },
-          },
-        },
-        required: ['connection', 'query'],
-      },
-    },
-    
-    async execute(
-      params: QueryDatabaseParams
-    ): Promise<QueryDatabaseResult> {
-      // 安全检查：只允许 SELECT
-      const normalizedQuery = params.query.trim().toLowerCase();
-      if (!normalizedQuery.startsWith('select')) {
-        throw new Error('Only SELECT queries are allowed');
-      }
-      
-      // 获取连接
-      const db = getDatabaseConnection(params.connection);
-      
-      try {
-        // 设置查询超时
-        await db.query('SET statement_timeout = 30000');
-        
-        // 执行查询
-        const result = await db.query(params.query, params.params);
-        
-        return {
-          rows: result.rows,
-          rowCount: result.rowCount,
-          columns: result.fields.map((f: any) => f.name),
-        };
-      } catch (error) {
-        throw new Error(`Query failed: ${(error as Error).message}`);
-      }
-    },
-  };
-}
-```
-
-### 13.5.4 工具最佳实践
-
-```typescript
-// 工具开发最佳实践
-
-// 1. 输入验证
-function validateInput(params: unknown, schema: JSONSchema): void {
-  const validator = new JSONSchemaValidator();
-  const result = validator.validate(params, schema);
-  
-  if (!result.valid) {
-    throw new Error(`Invalid input: ${result.errors.join(', ')}`);
-  }
-}
-
-// 2. 错误处理
-class ToolError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public retryable: boolean = false
-  ) {
-    super(message);
-  }
-}
-
-// 3. 超时控制
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new ToolError('Timeout', 'TIMEOUT')),
-        timeoutMs
-      )
-    ),
-  ]);
-}
-
-// 4. 结果格式化
-function formatToolResult(result: unknown): string {
-  if (typeof result === 'string') {
-    return result;
-  }
-  
-  if (typeof result === 'object') {
-    return JSON.stringify(result, null, 2);
-  }
-  
-  return String(result);
-}
-
-// 5. 日志记录
-function logToolExecution(
-  toolName: string,
-  params: unknown,
-  result: unknown,
-  duration: number
-): void {
-  console.log(`[Tool] ${toolName}`, {
-    params: sanitizeForLog(params),
-    success: !(result instanceof Error),
-    duration: `${duration}ms`,
-  });
-}
-
-// 6. 敏感信息过滤
-function sanitizeForLog(data: unknown): unknown {
-  if (typeof data !== 'object' || data === null) {
-    return data;
-  }
-  
-  const sensitiveKeys = ['password', 'token', 'secret', 'key'];
-  const sanitized: Record<string, unknown> = {};
-  
-  for (const [key, value] of Object.entries(data)) {
-    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
-      sanitized[key] = '***';
-    } else {
-      sanitized[key] = sanitizeForLog(value);
-    }
-  }
-  
-  return sanitized;
-}
-```
-
----
-
-## 本章小结
-
-通过本章的学习，你应该掌握了：
-
-1. **工具概述** - 什么是工具、工具 vs 技能、工具分类
-2. **工具定义** - JSON Schema、参数类型、描述编写
-3. **工具实现** - 同步、异步、流式工具，工具组合
-4. **工具注册** - 内置工具、技能工具、动态注册
-5. **自定义工具** - 开发流程、示例、最佳实践
-
----
-
-*下一章：第 14 章 记忆系统（RAG）*
+- OpenClaw 工具文档
+- 工具开发指南
+- 安全最佳实践
