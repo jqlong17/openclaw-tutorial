@@ -42,10 +42,10 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: '第7章：Discord集成', link: '/guide/chapter-07' },
-          { text: '第8章：Discord高级功能', link: '/platform/chapter-08' },
-          { text: '第9章：Telegram集成', link: '/platform/chapter-09' },
-          { text: '第10章：飞书集成', link: '/platform/chapter-10' },
-          { text: '第11章：iMessage集成', link: '/platform/chapter-11' },
+          { text: '第8章：Discord高级功能', link: '/guide/chapter-08' },
+          { text: '第9章：Telegram集成', link: '/guide/chapter-09' },
+          { text: '第10章：飞书集成', link: '/guide/chapter-10' },
+          { text: '第11章：iMessage集成', link: '/guide/chapter-11' },
         ]
       },
       {
