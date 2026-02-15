@@ -1,474 +1,354 @@
 # 第 12 章：Agent 运行器
 
-> 本章将深入解析 OpenClaw 中 Agent 的运行机制，包括生命周期管理、提示词工程、上下文处理和多轮对话等核心内容。
+> 本章将讲解 OpenClaw 中 Agent 的运行机制，包括生命周期、提示词工程和上下文处理。
 
 ---
 
-## 12.1 Agent 生命周期
+## 12.1 Agent 是什么？
 
-### 12.1.1 生命周期概述
+### 12.1.1 从"程序"到"Agent"
 
-Agent 从启动到结束的完整生命周期：
+**传统程序**：
+- 按照固定的逻辑执行
+- 输入确定，输出确定
+- 比如：计算器输入 1+1，永远输出 2
 
-```mermaid
-graph LR
-    A[初始化] --> B[加载配置]
-    B --> C[读取人格文件]
-    C --> D[等待消息]
-    D --> E[处理消息]
-    E --> F[调用AI模型]
-    F --> G[执行工具]
-    G --> H[生成回复]
-    H --> I[发送回复]
-    I --> D
-    D --> J[关闭]
-```
+**Agent**：
+- 有自己的"性格"和"记忆"
+- 能理解上下文，做出灵活响应
+- 比如：你问"今天怎么样？"，它会根据时间、你的历史对话给出不同回答
 
-### 12.1.2 初始化流程
+**类比理解**：
+- **传统程序** = 自动售货机：投币 → 选商品 → 出货（固定流程）
+- **Agent** = 服务员：能听懂你的需求，灵活推荐，记住你的喜好
 
-```typescript
-class AgentLifecycle {
-  async initialize(configPath: string): Promise<void> {
-    // 1. 加载配置文件
-    this.config = await this.loadConfig(configPath);
-    
-    // 2. 初始化记忆系统
-    this.memory = new MemoryManager({
-      workspaceDir: this.config.workspaceDir,
-    });
-    await this.memory.initialize();
-    
-    // 3. 注册工具
-    this.tools = new ToolRegistry();
-    await this.registerBuiltinTools();
-    
-    // 4. 加载人格
-    await this.loadPersona();
-    
-    // 5. 预热模型连接
-    await this.warmupModelConnection();
-    
-    console.log('✅ Agent ready');
-  }
-  
-  private async loadPersona(): Promise<void> {
-    // 读取 SOUL.md
-    const soulPath = join(this.config.workspaceDir, 'SOUL.md');
-    const soulContent = await readFile(soulPath, 'utf-8');
-    
-    // 读取 IDENTITY.md
-    const identityPath = join(this.config.workspaceDir, 'IDENTITY.md');
-    const identityContent = await readFile(identityPath, 'utf-8');
-    
-    // 构建系统提示词
-    this.systemPrompt = this.buildSystemPrompt({
-      soul: soulContent,
-      identity: identityContent,
-    });
-  }
-}
-```
+### 12.1.2 Agent 的核心组成
 
-### 12.1.3 消息处理循环
+一个完整的 Agent 包含：
 
-```typescript
-class MessageProcessingLoop {
-  private isRunning = false;
-  
-  async start(): Promise<void> {
-    this.isRunning = true;
-    
-    while (this.isRunning) {
-      const message = await this.getNextMessage();
-      
-      if (message) {
-        await this.processMessage(message);
-      } else {
-        await sleep(100);
-      }
-    }
-  }
-  
-  private async processMessage(message: IncomingMessage): Promise<void> {
-    try {
-      // 1. 预处理
-      const processedMessage = await this.preprocess(message);
-      
-      // 2. 构建上下文
-      const context = await this.buildContext(processedMessage);
-      
-      // 3. 调用AI
-      const response = await this.callAI(context);
-      
-      // 4. 处理响应
-      const reply = await this.processResponse(response);
-      
-      // 5. 发送回复
-      await this.sendReply(reply, message);
-      
-      // 6. 记录历史
-      await this.recordHistory(message, reply);
-      
-    } catch (error) {
-      console.error('Message processing failed:', error);
-      await this.handleError(error, message);
-    }
-  }
-}
-```
+| 组件 | 作用 | 类比 |
+|------|------|------|
+| **大脑（AI 模型）** | 理解、推理、生成回复 | 服务员的大脑 |
+| **记忆（Memory）** | 记住对话历史、用户信息 | 服务员的记事本 |
+| **工具（Tools）** | 执行具体操作 | 服务员的工具（POS机、菜单） |
+| **人格（Persona）** | 定义性格和行为方式 | 服务员的态度和风格 |
+| **上下文（Context）** | 当前对话的背景信息 | 服务员知道的当前情况 |
 
 ---
 
-## 12.2 提示词工程
+## 12.2 Agent 的生命周期
 
-### 12.2.1 系统提示词结构
+### 12.2.1 从启动到运行
 
-```typescript
-interface SystemPromptParts {
-  identity: string;
-  personality: string;
-  capabilities: string;
-  constraints: string;
-}
+**阶段一：初始化（出生）**
 
-class PromptBuilder {
-  buildSystemPrompt(parts: SystemPromptParts): string {
-    const sections: string[] = [];
-    
-    sections.push(this.formatSection('Identity', parts.identity));
-    sections.push(this.formatSection('Personality', parts.personality));
-    sections.push(this.formatSection('Capabilities', parts.capabilities));
-    sections.push(this.formatSection('Constraints', parts.constraints));
-    
-    return sections.join('\n\n');
-  }
-  
-  private formatSection(title: string, content: string): string {
-    return `## ${title}\n\n${content}`;
-  }
-}
+Agent 启动时，会做以下准备工作：
+
+1. **加载配置**
+   - 读取配置文件（模型选择、参数设置）
+   - 检查必要的文件和目录
+
+2. **加载人格**
+   - 读取 SOUL.md（我是谁）
+   - 读取 IDENTITY.md（我的基本信息）
+   - 构建系统提示词（告诉 AI 如何表现）
+
+3. **初始化记忆**
+   - 连接记忆数据库
+   - 加载长期记忆
+
+4. **注册工具**
+   - 加载内置工具（文件操作、网络请求等）
+   - 加载自定义工具
+
+5. **预热连接**
+   - 测试与 AI 模型的连接
+   - 确保一切就绪
+
+**阶段二：运行（工作）**
+
+初始化完成后，Agent 进入消息处理循环：
+
+```
+等待消息 → 接收消息 → 处理消息 → 生成回复 → 发送回复
+    ↑                                              ↓
+    └──────────────── 循环 ────────────────────────┘
 ```
 
-### 12.2.2 少样本提示（Few-Shot）
+**阶段三：关闭（休息）**
 
-```typescript
-interface FewShotExample {
-  input: string;
-  output: string;
-}
+当需要关闭时：
+- 保存当前状态
+- 关闭数据库连接
+- 清理资源
 
-class FewShotPromptBuilder {
-  private examples: FewShotExample[] = [];
-  
-  addExample(example: FewShotExample): void {
-    this.examples.push(example);
-  }
-  
-  buildFewShotPrompt(task: string): string {
-    const parts: string[] = [];
-    
-    parts.push(`Task: ${task}`);
-    parts.push('');
-    parts.push('Examples:');
-    
-    for (let i = 0; i < this.examples.length; i++) {
-      const ex = this.examples[i];
-      parts.push(`\nExample ${i + 1}:`);
-      parts.push(`Input: ${ex.input}`);
-      parts.push(`Output: ${ex.output}`);
-    }
-    
-    return parts.join('\n');
-  }
-}
-```
+### 12.2.2 消息处理流程
 
-### 12.2.3 思维链（Chain-of-Thought）
+**当你发送一条消息时，发生了什么？**
 
-```typescript
-class ChainOfThoughtPrompt {
-  buildCOTPrompt(question: string): string {
-    return `
-Question: ${question}
+**第一步：接收消息**
+- 从 Discord/Telegram/飞书等平台接收消息
+- 解析消息内容（文字、图片等）
+- 提取发送者信息
 
-Let's think through this step by step:
-1. First, let's understand what we're being asked
-2. Then, break down the problem into parts
-3. Analyze each part systematically
-4. Finally, combine our findings into an answer
+**第二步：预处理**
+- 过滤垃圾信息
+- 检查是否需要响应（比如被 @提及才回复）
+- 格式化消息内容
 
-Step-by-step reasoning:
-`;
-  }
-}
-```
+**第三步：构建上下文**
+- 获取对话历史（最近几条消息）
+- 加载相关记忆（之前聊过的内容）
+- 准备系统提示词（告诉 AI 怎么回答）
+
+**第四步：调用 AI 模型**
+- 把所有信息发给 AI 模型
+- AI 模型理解内容并生成回复
+- 可能需要多次调用（比如先思考，再回答）
+
+**第五步：执行工具（如果需要）**
+- 如果用户要求查天气，调用天气工具
+- 如果要求发邮件，调用邮件工具
+- 工具执行结果返回给 AI
+
+**第六步：生成最终回复**
+- AI 根据工具结果生成最终回答
+- 格式化回复内容
+
+**第七步：发送回复**
+- 把回复发送给用户
+- 记录到记忆系统
+
+**整个过程示例**：
+
+> 你：明天北京天气怎么样？
+> 
+> Agent 内部处理：
+> 1. 接收：解析出文字内容
+> 2. 预处理：判断需要响应
+> 3. 上下文：加载对话历史
+> 4. AI 调用：理解意图（查询天气）
+> 5. 工具执行：调用天气 API
+> 6. 生成回复："明天北京晴朗，15-22°C"
+> 7. 发送：把回复发给你
 
 ---
 
-## 12.3 上下文管理
+## 12.3 提示词工程
 
-### 12.3.1 上下文窗口管理
+### 12.3.1 什么是提示词？
 
-```typescript
-interface ContextWindow {
-  systemPrompt: string;
-  messages: Message[];
-  totalTokens: number;
-}
+**提示词（Prompt）** 就是给 AI 的指令，告诉它：
+- 你是谁
+- 你要做什么
+- 怎么回答问题
 
-class ContextWindowManager {
-  private maxTokens: number;
-  
-  buildContextWindow(
-    systemPrompt: string,
-    history: Message[],
-    currentMessage: string
-  ): ContextWindow {
-    const availableTokens = this.maxTokens;
-    
-    const systemTokens = this.estimateTokens(systemPrompt);
-    const currentTokens = this.estimateTokens(currentMessage);
-    const historyBudget = availableTokens - systemTokens - currentTokens;
-    
-    const selectedHistory = this.selectHistoryMessages(
-      history,
-      historyBudget
-    );
-    
-    const messages: Message[] = [
-      ...selectedHistory,
-      { role: 'user', content: currentMessage },
-    ];
-    
-    return {
-      systemPrompt,
-      messages,
-      totalTokens: systemTokens + messages.reduce((sum, m) => 
-        sum + this.estimateTokens(m.content), 0),
-    };
-  }
-  
-  private selectHistoryMessages(
-    history: Message[],
-    budget: number
-  ): Message[] {
-    const selected: Message[] = [];
-    let usedTokens = 0;
-    
-    for (let i = history.length - 1; i >= 0; i--) {
-      const message = history[i];
-      const tokens = this.estimateTokens(message.content);
-      
-      if (usedTokens + tokens <= budget) {
-        selected.unshift(message);
-        usedTokens += tokens;
-      } else {
-        break;
-      }
-    }
-    
-    return selected;
-  }
-  
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 3.5);
-  }
-}
-```
+**类比**：就像给新员工的工作手册
 
-### 12.3.2 上下文修剪策略
+### 12.3.2 系统提示词
 
-```typescript
-enum PruningStrategy {
-  SLIDING_WINDOW = 'sliding_window',
-  SUMMARIZATION = 'summarization',
-  IMPORTANCE = 'importance',
-}
+**系统提示词** 是 Agent 的"基本设定"，每次对话都会带上。
 
-class ContextPruner {
-  async prune(
-    messages: Message[],
-    targetTokenCount: number
-  ): Promise<Message[]> {
-    // 保留最近的消息
-    const pruned: Message[] = [];
-    let tokenCount = 0;
-    
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      const tokens = this.estimateTokens(msg.content);
-      
-      if (tokenCount + tokens <= targetTokenCount) {
-        pruned.unshift(msg);
-        tokenCount += tokens;
-      } else {
-        break;
-      }
-    }
-    
-    return pruned;
-  }
-  
-  private estimateTokens(text: string): number {
-    return Math.ceil(text.length / 3.5);
-  }
-}
-```
+**包含内容**：
+
+1. **身份定义**
+   > 你是 OpenClaw AI 助手，一个智能、友善的助手。
+
+2. **能力说明**
+   > 你可以帮助用户：
+   > - 回答技术问题
+   > - 执行系统命令
+   > - 管理文件和日程
+
+3. **行为准则**
+   > - 回答要简洁明了
+   > - 不确定时诚实说明
+   > - 尊重用户隐私
+
+4. **格式要求**
+   > - 使用 Markdown 格式
+   > - 代码块标注语言
+   > - 重要信息用粗体
+
+**这些设定来自哪里？**
+
+- **SOUL.md**：定义性格、价值观、行为方式
+- **IDENTITY.md**：定义基本信息、能力范围
+- **USER.md**：了解用户偏好
+
+### 12.3.3 动态提示词
+
+除了固定的系统提示词，还可以根据情况动态添加：
+
+**示例 1：根据时间**
+
+早上：
+> 现在是早上 9 点，用户可能刚开始工作。
+
+晚上：
+> 现在是晚上 10 点，用户可能在休息。
+
+**示例 2：根据用户状态**
+
+新用户：
+> 这是新用户，需要更多引导和帮助。
+
+老用户：
+> 这是老用户，可以更简洁地回答。
+
+**示例 3：根据对话历史**
+
+如果之前讨论过某个话题：
+> 之前你们讨论过 Python，用户有一定基础。
 
 ---
 
-## 12.4 多轮对话
+## 12.4 上下文处理
 
-### 12.4.1 对话状态维护
+### 12.4.1 为什么需要上下文？
 
-```typescript
-interface ConversationState {
-  sessionKey: string;
-  messages: Message[];
-  metadata: {
-    startedAt: Date;
-    lastActivity: Date;
-    messageCount: number;
-  };
-}
+**没有上下文的问题**：
 
-class ConversationManager {
-  private conversations = new Map<string, ConversationState>();
-  
-  getOrCreateConversation(sessionKey: string): ConversationState {
-    if (!this.conversations.has(sessionKey)) {
-      this.conversations.set(sessionKey, {
-        sessionKey,
-        messages: [],
-        metadata: {
-          startedAt: new Date(),
-          lastActivity: new Date(),
-          messageCount: 0,
-        },
-      });
-    }
-    
-    return this.conversations.get(sessionKey)!;
-  }
-  
-  addMessage(sessionKey: string, message: Message): void {
-    const conversation = this.getOrCreateConversation(sessionKey);
-    conversation.messages.push(message);
-    conversation.metadata.lastActivity = new Date();
-    conversation.metadata.messageCount++;
-  }
-  
-  getHistory(sessionKey: string, limit: number = 20): Message[] {
-    const conversation = this.conversations.get(sessionKey);
-    if (!conversation) return [];
-    
-    return conversation.messages.slice(-limit);
-  }
-}
-```
+> 你：北京天气怎么样？
+> Bot：北京今天晴朗，25°C。
+> 你：那明天呢？
+> Bot：？？？（不知道你在问哪个城市）
 
-### 12.4.2 意图识别
+**有上下文的情况**：
 
-```typescript
-interface Intent {
-  type: string;
-  confidence: number;
-  entities: Record<string, string>;
-}
+> 你：北京天气怎么样？
+> Bot：北京今天晴朗，25°C。
+> 你：那明天呢？
+> Bot：北京明天多云，22°C。（知道还是问北京）
 
-class IntentRecognizer {
-  async recognizeIntent(message: string): Promise<Intent> {
-    const prompt = `
-Analyze the following user message and identify the intent:
+### 12.4.2 上下文的组成
 
-Message: "${message}"
+**上下文包括**：
 
-Possible intents:
-- question: User is asking for information
-- command: User wants the system to do something
-- greeting: User is saying hello
-- farewell: User is saying goodbye
-- feedback: User is providing feedback
-- other: None of the above
+| 类型 | 内容 | 作用 |
+|------|------|------|
+| **对话历史** | 最近的几条消息 | 理解当前话题 |
+| **长期记忆** | 之前的重要信息 | 记住用户偏好 |
+| **系统信息** | 时间、用户信息 | 提供背景 |
+| **工具结果** | 刚才查询的数据 | 基于事实回答 |
 
-Respond in JSON format:
-{
-  "type": "intent_type",
-  "confidence": 0.95,
-  "entities": {
-    "key": "value"
-  }
-}
-`;
-    
-    const response = await this.model.generate(prompt);
-    return JSON.parse(response);
-  }
-}
-```
+### 12.4.3 上下文窗口管理
 
-### 12.4.3 对话恢复
+**什么是上下文窗口？**
 
-```typescript
-class ConversationRecovery {
-  async saveConversation(
-    sessionKey: string,
-    state: ConversationState
-  ): Promise<void> {
-    const filePath = join(
-      this.config.sessionsDir,
-      `${sessionKey}.json`
-    );
-    
-    await writeFile(
-      filePath,
-      JSON.stringify(state, null, 2)
-    );
-  }
-  
-  async loadConversation(
-    sessionKey: string
-  ): Promise<ConversationState | null> {
-    const filePath = join(
-      this.config.sessionsDir,
-      `${sessionKey}.json`
-    );
-    
-    try {
-      const data = await readFile(filePath, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
-  }
-  
-  async resumeConversation(sessionKey: string): Promise<void> {
-    const saved = await this.loadConversation(sessionKey);
-    
-    if (saved) {
-      // 恢复对话状态
-      this.conversationManager.conversations.set(
-        sessionKey,
-        saved
-      );
-      
-      console.log(`Resumed conversation: ${sessionKey}`);
-    }
-  }
-}
-```
+AI 模型能处理的文字长度有限（比如 4000 个词），这就是"上下文窗口"。
+
+**问题**：
+- 对话太长，装不下怎么办？
+- 怎么选择保留哪些内容？
+
+**解决方案**：
+
+1. **滑动窗口**
+   - 只保留最近的 N 条消息
+   - 旧的消息丢弃
+
+2. **智能筛选**
+   - 保留重要的信息
+   - 丢弃闲聊内容
+
+3. **摘要总结**
+   - 把长对话总结成几句话
+   - 既节省空间，又保留关键信息
+
+**示例**：
+
+原始对话（10 条消息）：
+> 用户：你好
+> Bot：你好！有什么可以帮你的？
+> 用户：我想学 Python
+> Bot：太好了！Python 是很好的编程语言。
+> 用户：从哪里开始？
+> Bot：建议从基础语法开始...
+> （中间讨论了很多细节）
+> 用户：好的，我去试试
+> Bot：加油！有问题随时问我。
+> 用户：谢谢
+
+摘要后（2 条消息）：
+> 【之前讨论】用户想学习 Python，已推荐基础语法教程
+> 用户：谢谢
+
+### 12.4.4 多轮对话处理
+
+**什么是多轮对话？**
+
+不是一问一答，而是连续的、有关联的多轮交流。
+
+**示例**：
+
+> 你：帮我订个闹钟
+> Bot：好的，几点？
+> 你：明天早上 7 点
+> Bot：好的，明天早上 7 点的闹钟已设置。
+> 你：再订一个 7 点半的
+> Bot：明天早上 7 点半的闹钟也已设置。
+
+**处理技巧**：
+
+1. **跟踪对话状态**
+   - 当前在哪个话题？
+   - 等待用户提供什么信息？
+
+2. **处理指代**
+   - "再订一个" → 知道还是指闹钟
+   - "明天" → 知道是相对于今天
+
+3. **保持连贯**
+   - 语气一致
+   - 信息不矛盾
 
 ---
 
-## 本章小结
+## 12.5 本章小结
 
-通过本章的学习，你应该掌握了：
+### 核心要点
 
-1. **Agent 生命周期** - 初始化、消息处理、资源清理
-2. **提示词工程** - 系统提示词构建、少样本提示、思维链
-3. **上下文管理** - 窗口管理、修剪策略、记忆注入
-4. **多轮对话** - 状态维护、意图识别、对话恢复
+1. **Agent 是什么**
+   - 有性格、有记忆的智能程序
+   - 能灵活响应，不是固定逻辑
+
+2. **生命周期**
+   - 初始化：加载配置、人格、记忆、工具
+   - 运行：接收 → 处理 → 回复的循环
+   - 关闭：保存状态，清理资源
+
+3. **提示词工程**
+   - 系统提示词：定义基本设定
+   - 动态提示词：根据情况调整
+   - 来源：SOUL.md、IDENTITY.md、USER.md
+
+4. **上下文处理**
+   - 对话历史、长期记忆、系统信息
+   - 上下文窗口有限，需要智能管理
+   - 多轮对话需要跟踪状态
+
+### 类比总结
+
+| 概念 | 类比 | 作用 |
+|------|------|------|
+| Agent | 服务员 | 服务用户 |
+| 生命周期 | 上班流程 | 准备 → 工作 → 下班 |
+| 提示词 | 工作手册 | 告诉 AI 怎么做 |
+| 上下文 | 记事本 | 记住当前情况 |
+| 记忆 | 客户档案 | 记住用户信息 |
+
+### 下一步
+
+在下一章，我们将学习 **工具系统**：
+- Agent 如何调用外部工具
+- 工具的类型和注册
+- 如何创建自定义工具
 
 ---
 
-*下一章：第 13 章 工具系统*
+## 参考资源
+
+- OpenClaw Agent 配置文档
+- 提示词工程最佳实践
+- 上下文管理策略
