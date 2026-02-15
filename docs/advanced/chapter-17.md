@@ -1,729 +1,418 @@
 # 第 17 章：插件系统
 
-> 本章将深入解析 OpenClaw 的插件系统，包括插件架构、钩子机制、开发插件和插件市场。
+> 本章将讲解 OpenClaw 的插件系统，包括插件的概念、作用和使用方式。
 
 ---
 
-## 17.1 插件架构
+## 17.1 什么是插件？
 
-### 17.1.1 什么是插件
+### 17.1.1 生活中的插件
 
-插件是扩展 OpenClaw 功能的模块化组件：
+**浏览器的扩展程序**：
+- 广告拦截器：帮你屏蔽网页广告
+- 翻译插件：自动翻译外文网页
+- 密码管理器：自动填充密码
 
-```mermaid
-graph TB
-    subgraph OpenClaw 核心
-        CORE[Core]
-        HOOK[Hook Manager]
-    end
+**这些扩展程序就是"插件"**：
+- 它们不是浏览器本身的功能
+- 但安装后，能增强浏览器的能力
+- 不需要修改浏览器代码
 
-    subgraph 插件层
-        P1[插件 A]
-        P2[插件 B]
-        P3[插件 C]
-    end
+**类比理解**：
 
-    subgraph 扩展功能
-        E1[新消息处理器]
-        E2[自定义命令]
-        E3[数据转换器]
-    end
+- **手机** = OpenClaw 核心
+- **手机壳、耳机、充电宝** = 插件
+- 插件让手机功能更强大，但不需要改装手机
 
-    CORE --> HOOK
-    HOOK --> P1
-    HOOK --> P2
-    HOOK --> P3
-    P1 --> E1
-    P2 --> E2
-    P3 --> E3
-```
+### 17.1.2 程序中的插件
 
-**插件 vs 技能 vs 工具**：
+**什么是插件？**
+
+插件是**扩展软件功能**的独立模块：
+- 不修改原有代码
+- 按需安装和卸载
+- 增强或改变软件行为
+
+**插件的优势**：
+
+| 优势 | 说明 |
+|------|------|
+| **模块化** | 功能独立，互不影响 |
+| **可扩展** | 随时添加新功能 |
+| **可维护** | 插件出问题不影响主程序 |
+| **生态化** | 开发者可以独立开发插件 |
+
+---
+
+## 17.2 插件 vs 技能 vs 工具
+
+你可能已经听说过"技能"和"工具"，它们和插件有什么区别？
+
+### 17.2.1 三者对比
 
 | 特性 | 插件 | 技能 | 工具 |
 |------|------|------|------|
-| **作用域** | 系统级扩展 | 功能集合 | 单一功能 |
-| **生命周期** | 随系统启动 | 按需加载 | 调用时执行 |
-| **能力** | 拦截事件、修改行为 | 提供工具 | 执行具体操作 |
-| **示例** | 消息过滤器 | Git 管理 | 文件读取 |
+| **作用范围** | 系统级 | 功能级 | 操作级 |
+| **生命周期** | 长期运行 | 按需加载 | 即时执行 |
+| **主要能力** | 拦截事件、扩展功能 | 提供一组工具 | 执行单一操作 |
+| **例子** | 消息过滤器 | Git 管理 | 读取文件 |
 
-### 17.1.2 插件目录结构
+### 17.2.2 详细解释
 
-```
-plugins/
-├── my-plugin/
-│   ├── plugin.json          # 插件配置
-│   ├── index.ts             # 入口文件
-│   ├── hooks/
-│   │   ├── on-message.ts    # 消息钩子
-│   │   └── on-start.ts      # 启动钩子
-│   └── utils/
-│       └── helper.ts
-└── another-plugin/
-    └── ...
-```
+**工具（Tool）**：
+- 粒度最小
+- 做一件具体的事
+- 比如：读取文件、发送邮件
 
-### 17.1.3 插件配置
+**技能（Skill）**：
+- 粒度中等
+- 一组相关工具的集合
+- 比如：Git 管理（包含 git add、git commit 等工具）
 
-```json
-// plugin.json
-{
-  "name": "message-filter",
-  "version": "1.0.0",
-  "description": "过滤敏感消息内容",
-  "author": "Your Name",
-  "license": "MIT",
-  "main": "index.ts",
-  "hooks": [
-    "on-message",
-    "on-send"
-  ],
-  "config": {
-    "schema": {
-      "blockedWords": {
-        "type": "array",
-        "items": { "type": "string" },
-        "default": []
-      },
-      "logViolations": {
-        "type": "boolean",
-        "default": true
-      }
-    }
-  },
-  "permissions": [
-    "read:messages",
-    "write:messages"
-  ]
-}
-```
+**插件（Plugin）**：
+- 粒度最大
+- 系统级扩展
+- 可以拦截事件、修改行为
+- 比如：消息过滤器（拦截所有消息并检查）
+
+### 17.2.3 实际例子
+
+**场景：处理一条消息**
+
+1. **插件层**：消息过滤器插件
+   - 拦截消息
+   - 检查是否包含敏感词
+   - 决定是否放行
+
+2. **技能层**：自然语言处理技能
+   - 分析消息意图
+   - 提取关键信息
+
+3. **工具层**：具体执行
+   - 查询数据库
+   - 发送回复
 
 ---
 
-## 17.2 钩子机制
+## 17.3 OpenClaw 的插件能做什么？
 
-### 17.2.1 钩子类型
+### 17.3.1 事件拦截
 
-OpenClaw 提供多种钩子点：
+**什么是事件？**
+
+OpenClaw 在运行过程中会产生各种事件：
+- 收到新消息
+- 准备发送回复
+- 系统启动
+- 系统关闭
+
+**插件可以拦截这些事件**：
+
+**示例：消息过滤器**
+
+> 用户发送消息 → 插件拦截 → 检查内容 → 决定是否放行
+
+如果包含敏感词：
+- 阻止消息处理
+- 记录日志
+- 警告用户
+
+### 17.3.2 功能扩展
+
+**添加新功能**：
+
+插件可以给 OpenClaw 添加原本没有的功能：
+- 新的消息处理器
+- 新的命令
+- 新的数据源
+
+**示例：自动翻译插件**
+
+> 用户发送英文消息 → 插件自动翻译 → AI 看到中文
+
+这样即使用户用英文提问，AI 也能理解。
+
+### 17.3.3 行为修改
+
+**改变原有行为**：
+
+插件可以修改 OpenClaw 的默认行为：
+- 修改消息的格式
+- 改变回复的风格
+- 添加额外的处理步骤
+
+**示例：回复格式化插件**
+
+> AI 生成回复 → 插件格式化 → 添加时间戳和签名
+
+最终效果：
+> 【2024-01-15 10:30】
+> 
+> 这是回复内容...
+> 
+> —— OpenClaw 助手
+
+---
+
+## 17.4 常见的插件类型
+
+### 17.4.1 消息处理插件
+
+**功能**：处理进出的消息
+
+**示例**：
+- **敏感词过滤**：检查消息内容
+- **自动翻译**：翻译外文消息
+- **消息格式化**：统一消息格式
+- **垃圾信息检测**：识别并拦截垃圾消息
+
+### 17.4.2 安全插件
+
+**功能**：增强系统安全
+
+**示例**：
+- **访问控制**：限制某些功能的使用
+- **审计日志**：记录所有操作
+- **速率限制**：防止滥用
+- **内容审核**：检查不当内容
+
+### 17.4.3 集成插件
+
+**功能**：连接外部系统
+
+**示例**：
+- **数据库连接**：连接 MySQL、MongoDB
+- **缓存插件**：连接 Redis
+- **消息队列**：连接 RabbitMQ
+- **监控插件**：连接 Prometheus
+
+### 17.4.4 增强插件
+
+**功能**：增强用户体验
+
+**示例**：
+- **快捷命令**：添加自定义命令
+- **模板插件**：提供消息模板
+- **统计插件**：收集使用数据
+- **备份插件**：自动备份数据
+
+---
+
+## 17.5 插件的使用
+
+### 17.5.1 安装插件
+
+**步骤**：
+
+1. **下载插件**
+   - 从插件市场下载
+   - 或从 GitHub 克隆
+
+2. **放置到插件目录**
+   ```
+   plugins/
+   └── my-plugin/
+       ├── plugin.json
+       └── index.js
+   ```
+
+3. **配置插件**
+   - 在配置文件中启用
+   - 设置插件参数
+
+4. **重启 OpenClaw**
+   - 插件在启动时加载
+
+### 17.5.2 管理插件
+
+**启用/禁用**：
+
+在配置中控制：
+> 插件 A：启用
+> 插件 B：禁用
+
+**更新插件**：
+
+1. 下载新版本
+2. 替换旧版本文件
+3. 重启 OpenClaw
+
+**卸载插件**：
+
+1. 从配置中禁用
+2. 删除插件目录
+3. 重启 OpenClaw
+
+### 17.5.3 配置插件
+
+**插件配置示例**：
+
+```
+插件：消息过滤器
+配置：
+  - 敏感词列表：["脏话1", "脏话2"]
+  - 拦截方式：警告并记录
+  - 白名单用户：["admin"]
+```
+
+**配置说明**：
+- 每个插件有自己的配置项
+- 在 plugin.json 中定义配置结构
+- 在 OpenClaw 配置文件中设置具体值
+
+---
+
+## 17.6 插件开发简介
+
+### 17.6.1 开发流程
+
+**步骤一：规划功能**
+- 确定插件要做什么
+- 确定需要拦截哪些事件
+
+**步骤二：创建文件**
+```
+my-plugin/
+├── plugin.json      # 插件信息
+└── index.js         # 插件代码
+```
+
+**步骤三：编写代码**
+- 实现钩子函数
+- 处理事件
+- 执行功能
+
+**步骤四：测试**
+- 本地测试
+- 调试问题
+
+**步骤五：发布**
+- 打包插件
+- 发布到插件市场
+
+### 17.6.2 插件结构
+
+**plugin.json**：
+- 插件名称、版本
+- 作者信息
+- 需要的权限
+- 配置项定义
+
+**index.js**：
+- 插件入口
+- 注册钩子
+- 实现功能
+
+### 17.6.3 钩子机制
+
+**什么是钩子？**
+
+钩子是 OpenClaw 提供的"挂载点"，插件可以在这些点上添加自己的逻辑。
+
+**常用钩子**：
 
 | 钩子 | 触发时机 | 用途 |
-|------|----------|------|
-| `on-start` | 系统启动时 | 初始化资源 |
-| `on-message` | 收到消息时 | 消息预处理 |
-| `on-send` | 发送消息前 | 消息后处理 |
-| `on-error` | 发生错误时 | 错误处理 |
-| `on-channel-connect` | 通道连接时 | 通道初始化 |
-| `on-agent-turn` | Agent 执行前 | 修改提示词 |
+|------|---------|------|
+| **on-start** | 系统启动时 | 初始化插件 |
+| **on-message** | 收到消息时 | 处理消息 |
+| **on-send** | 发送回复前 | 修改回复 |
+| **on-stop** | 系统关闭时 | 清理资源 |
 
-### 17.2.2 钩子实现
+**示例**：
 
-```typescript
-// /src/plugins/hook-manager.ts
-
-interface HookContext {
-  pluginId: string;
-  config: Record<string, unknown>;
-  logger: Logger;
-}
-
-type HookHandler<T = unknown, R = T> = (
-  data: T,
-  context: HookContext
-) => Promise<R> | R;
-
-class HookManager {
-  private hooks = new Map<string, HookHandler[]>();
-  
-  // 注册钩子
-  register(hookName: string, handler: HookHandler): void {
-    const handlers = this.hooks.get(hookName) || [];
-    handlers.push(handler);
-    this.hooks.set(hookName, handlers);
-  }
-  
-  // 执行钩子
-  async execute<T, R>(
-    hookName: string,
-    data: T,
-    context: HookContext
-  ): Promise<R> {
-    const handlers = this.hooks.get(hookName) || [];
-    
-    let result: unknown = data;
-    
-    for (const handler of handlers) {
-      try {
-        result = await handler(result as T, context);
-      } catch (error) {
-        context.logger.error(`Hook ${hookName} failed:`, error);
-        
-        // 根据配置决定是否继续
-        if (context.config.stopOnError) {
-          throw error;
-        }
-      }
-    }
-    
-    return result as R;
-  }
-  
-  // 执行钩子（并行）
-  async executeParallel<T>(
-    hookName: string,
-    data: T,
-    context: HookContext
-  ): Promise<unknown[]> {
-    const handlers = this.hooks.get(hookName) || [];
-    
-    return Promise.all(
-      handlers.map(async (handler) => {
-        try {
-          return await handler(data, context);
-        } catch (error) {
-          context.logger.error(`Hook ${hookName} failed:`, error);
-          return null;
-        }
-      })
-    );
-  }
-}
-```
-
-### 17.2.3 消息钩子示例
-
-```typescript
-// plugins/message-filter/hooks/on-message.ts
-
-import type { InboundMessage } from '@/types';
-
-export const onMessage: HookHandler<InboundMessage> = async (
-  message,
-  context
-) => {
-  const { blockedWords, logViolations } = context.config;
-  
-  // 检查敏感词
-  const hasBlockedWord = blockedWords.some((word: string) =>
-    message.content.toLowerCase().includes(word.toLowerCase())
-  );
-  
-  if (hasBlockedWord) {
-    if (logViolations) {
-      context.logger.warn('Blocked message:', {
-        from: message.from,
-        content: message.content.slice(0, 100),
-      });
-    }
-    
-    // 返回 null 表示拦截消息
-    return null;
-  }
-  
-  // 修改消息内容
-  let content = message.content;
-  
-  // 自动替换某些内容
-  content = content.replace(/@here/g, '[mention: everyone]');
-  content = content.replace(/@channel/g, '[mention: channel]');
-  
-  return {
-    ...message,
-    content,
-  };
-};
-```
-
-### 17.2.4 发送钩子示例
-
-```typescript
-// plugins/message-formatter/hooks/on-send.ts
-
-import type { OutboundMessage } from '@/types';
-
-export const onSend: HookHandler<OutboundMessage> = async (
-  message,
-  context
-) => {
-  const { formatLinks, addSignature } = context.config;
-  
-  let content = message.content;
-  
-  // 格式化链接
-  if (formatLinks) {
-    // Discord 中自动包裹链接
-    if (message.channel === 'discord') {
-      content = content.replace(
-        /(https?:\/\/[^\s]+)/g,
-        '<$1>'
-      );
-    }
-  }
-  
-  // 添加签名
-  if (addSignature) {
-    const signature = '\n\n_由 OpenClaw 自动发送_';
-    if (!content.includes(signature)) {
-      content += signature;
-    }
-  }
-  
-  return {
-    ...message,
-    content,
-  };
-};
-```
+> 收到消息 → 触发 on-message 钩子 → 插件处理 → 继续后续流程
 
 ---
 
-## 17.3 开发插件
+## 17.7 插件生态
 
-### 17.3.1 插件开发流程
+### 17.7.1 插件市场
 
-```
-1. 创建目录
-   mkdir plugins/my-plugin
+**什么是插件市场？**
 
-2. 编写配置
-   plugins/my-plugin/plugin.json
+插件市场是集中存放和分享插件的地方：
+- 浏览可用插件
+- 下载安装插件
+- 分享自己开发的插件
 
-3. 实现功能
-   plugins/my-plugin/index.ts
+**好处**：
+- 不用重复造轮子
+- 社区共享功能
+- 快速扩展能力
 
-4. 注册钩子
-   plugins/my-plugin/hooks/*.ts
+### 17.7.2 优秀插件推荐
 
-5. 测试插件
-   npm run dev
+**官方插件**：
+- 日志插件：增强日志功能
+- 监控插件：系统监控
+- 备份插件：数据备份
 
-6. 打包发布
-   npm run build
-```
+**社区插件**：
+- 多语言插件：自动翻译
+- 数据分析插件：统计分析
+- 自定义命令插件：添加命令
 
-### 17.3.2 完整插件示例
+### 17.7.3 贡献插件
 
-```typescript
-// plugins/auto-reply/index.ts
+**如何贡献**：
+1. 开发自己的插件
+2. 测试确保稳定
+3. 编写文档
+4. 提交到插件市场
 
-import { Plugin } from '@/plugins/types';
-
-const autoReplyPlugin: Plugin = {
-  name: 'auto-reply',
-  version: '1.0.0',
-  
-  async initialize(context) {
-    context.logger.info('Auto-reply plugin initialized');
-    
-    // 加载关键词配置
-    const keywords = context.config.keywords || {};
-    
-    // 注册消息钩子
-    context.hooks.register('on-message', async (message, ctx) => {
-      // 检查是否匹配关键词
-      for (const [keyword, reply] of Object.entries(keywords)) {
-        if (message.content.toLowerCase().includes(keyword.toLowerCase())) {
-          // 发送自动回复
-          await ctx.sendMessage({
-            channel: message.channel,
-            to: message.chatId,
-            message: reply as string,
-            replyTo: message.id,
-          });
-          
-          ctx.logger.info(`Auto-replied to ${message.from}`);
-        }
-      }
-      
-      return message;
-    });
-  },
-  
-  async destroy(context) {
-    context.logger.info('Auto-reply plugin destroyed');
-  },
-};
-
-export default autoReplyPlugin;
-```
-
-```json
-// plugins/auto-reply/plugin.json
-{
-  "name": "auto-reply",
-  "version": "1.0.0",
-  "description": "根据关键词自动回复消息",
-  "main": "index.ts",
-  "hooks": ["on-message"],
-  "config": {
-    "schema": {
-      "keywords": {
-        "type": "object",
-        "additionalProperties": { "type": "string" },
-        "default": {
-          "你好": "你好！有什么可以帮助你的？",
-          "帮助": "我可以帮你回答问题、执行任务。请告诉我你的需求。"
-        }
-      }
-    }
-  }
-}
-```
-
-### 17.3.3 数据库插件示例
-
-```typescript
-// plugins/message-logger/index.ts
-
-import { Plugin } from '@/plugins/types';
-import { Database } from 'better-sqlite3';
-
-const messageLoggerPlugin: Plugin = {
-  name: 'message-logger',
-  version: '1.0.0',
-  
-  async initialize(context) {
-    const db = new Database(context.config.dbPath || './messages.db');
-    
-    // 创建表
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp INTEGER NOT NULL,
-        channel TEXT NOT NULL,
-        from_user TEXT NOT NULL,
-        content TEXT NOT NULL,
-        message_type TEXT DEFAULT 'text'
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_channel ON messages(channel);
-    `);
-    
-    // 注册消息钩子
-    context.hooks.register('on-message', async (message, ctx) => {
-      try {
-        const stmt = db.prepare(`
-          INSERT INTO messages (timestamp, channel, from_user, content, message_type)
-          VALUES (?, ?, ?, ?, ?)
-        `);
-        
-        stmt.run(
-          message.timestamp,
-          message.channel,
-          message.from,
-          message.content,
-          message.type || 'text'
-        );
-        
-        ctx.logger.debug('Message logged:', message.id);
-      } catch (error) {
-        ctx.logger.error('Failed to log message:', error);
-      }
-      
-      return message;
-    });
-    
-    // 保存数据库连接以便清理
-    context.set('db', db);
-  },
-  
-  async destroy(context) {
-    const db = context.get('db') as Database;
-    if (db) {
-      db.close();
-      context.logger.info('Database connection closed');
-    }
-  },
-};
-
-export default messageLoggerPlugin;
-```
-
-### 17.3.4 API 扩展插件
-
-```typescript
-// plugins/custom-api/index.ts
-
-import { Plugin } from '@/plugins/types';
-import { Router } from 'express';
-
-const customApiPlugin: Plugin = {
-  name: 'custom-api',
-  version: '1.0.0',
-  
-  async initialize(context) {
-    const router = Router();
-    
-    // 自定义 API 端点
-    router.get('/stats', async (req, res) => {
-      const stats = await context.getStats();
-      res.json(stats);
-    });
-    
-    router.post('/broadcast', async (req, res) => {
-      const { message, channels } = req.body;
-      
-      for (const channel of channels) {
-        await context.sendMessage({
-          channel,
-          message,
-        });
-      }
-      
-      res.json({ success: true, sentTo: channels.length });
-    });
-    
-    // 注册到网关
-    context.gateway.registerRouter('/custom', router);
-    
-    context.logger.info('Custom API routes registered');
-  },
-};
-
-export default customApiPlugin;
-```
+**注意事项**：
+- 遵守开源协议
+- 保护用户隐私
+- 避免恶意代码
 
 ---
 
-## 17.4 插件管理
+## 17.8 本章小结
 
-### 17.4.1 插件加载器
+### 核心要点
 
-```typescript
-// /src/plugins/loader.ts
+1. **什么是插件**
+   - 扩展软件功能的独立模块
+   - 不修改原有代码
+   - 模块化、可扩展、可维护
 
-class PluginLoader {
-  private plugins = new Map<string, LoadedPlugin>();
-  private pluginDir: string;
-  
-  constructor(pluginDir: string) {
-    this.pluginDir = pluginDir;
-  }
-  
-  async loadAll(): Promise<void> {
-    const entries = await readdir(this.pluginDir, { withFileTypes: true });
-    
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        try {
-          await this.loadPlugin(entry.name);
-        } catch (error) {
-          console.error(`Failed to load plugin ${entry.name}:`, error);
-        }
-      }
-    }
-  }
-  
-  async loadPlugin(name: string): Promise<void> {
-    const pluginPath = join(this.pluginDir, name);
-    const configPath = join(pluginPath, 'plugin.json');
-    
-    // 读取配置
-    const config = JSON.parse(await readFile(configPath, 'utf-8'));
-    
-    // 验证配置
-    this.validateConfig(config);
-    
-    // 检查依赖
-    await this.checkDependencies(config.dependencies);
-    
-    // 加载主文件
-    const mainPath = join(pluginPath, config.main);
-    const pluginModule = await import(mainPath);
-    const plugin: Plugin = pluginModule.default;
-    
-    // 初始化
-    const context = this.createPluginContext(config);
-    await plugin.initialize(context);
-    
-    // 保存
-    this.plugins.set(config.name, {
-      config,
-      instance: plugin,
-      context,
-    });
-    
-    console.log(`Plugin loaded: ${config.name} v${config.version}`);
-  }
-  
-  async unloadPlugin(name: string): Promise<void> {
-    const loaded = this.plugins.get(name);
-    if (!loaded) {
-      throw new Error(`Plugin not found: ${name}`);
-    }
-    
-    // 执行清理
-    if (loaded.instance.destroy) {
-      await loaded.instance.destroy(loaded.context);
-    }
-    
-    this.plugins.delete(name);
-    
-    console.log(`Plugin unloaded: ${name}`);
-  }
-  
-  private validateConfig(config: PluginConfig): void {
-    const required = ['name', 'version', 'main'];
-    for (const field of required) {
-      if (!config[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
-    }
-  }
-  
-  private async checkDependencies(deps?: string[]): Promise<void> {
-    if (!deps) return;
-    
-    for (const dep of deps) {
-      if (!this.plugins.has(dep)) {
-        throw new Error(`Missing dependency: ${dep}`);
-      }
-    }
-  }
-}
-```
+2. **插件 vs 技能 vs 工具**
+   - 插件：系统级扩展
+   - 技能：功能级集合
+   - 工具：操作级单一功能
 
-### 17.4.2 插件配置管理
+3. **插件能做什么**
+   - 事件拦截、功能扩展、行为修改
+   - 消息处理、安全增强、系统集成
 
-```typescript
-// /src/plugins/config-manager.ts
+4. **使用插件**
+   - 安装、配置、启用
+   - 管理插件生命周期
 
-class PluginConfigManager {
-  private configs = new Map<string, unknown>();
-  private configFile: string;
-  
-  constructor(configFile: string) {
-    this.configFile = configFile;
-    this.loadConfigs();
-  }
-  
-  private loadConfigs(): void {
-    try {
-      const content = readFileSync(this.configFile, 'utf-8');
-      const data = JSON.parse(content);
-      
-      for (const [pluginName, config] of Object.entries(data)) {
-        this.configs.set(pluginName, config);
-      }
-    } catch {
-      // 配置文件不存在，创建空配置
-      this.saveConfigs();
-    }
-  }
-  
-  get(pluginName: string): Record<string, unknown> {
-    return (this.configs.get(pluginName) || {}) as Record<string, unknown>;
-  }
-  
-  set(pluginName: string, config: unknown): void {
-    this.configs.set(pluginName, config);
-    this.saveConfigs();
-  }
-  
-  private saveConfigs(): void {
-    const data = Object.fromEntries(this.configs);
-    writeFileSync(this.configFile, JSON.stringify(data, null, 2));
-  }
-  
-  // 验证配置是否符合 schema
-  validate(pluginName: string, schema: JSONSchema): boolean {
-    const config = this.get(pluginName);
-    const validator = new JSONSchemaValidator();
-    return validator.validate(config, schema).valid;
-  }
-}
-```
+5. **插件开发**
+   - 钩子机制
+   - 开发流程
+   - 发布分享
 
-### 17.4.3 插件市场
+### 类比总结
 
-```typescript
-// /src/plugins/marketplace.ts
+| 概念 | 类比 | 作用 |
+|------|------|------|
+| 插件 | 手机配件 | 增强功能 |
+| 钩子 | 电源插座 | 提供接入点 |
+| 插件市场 | 应用商店 | 获取插件 |
 
-interface MarketplacePlugin {
-  name: string;
-  version: string;
-  description: string;
-  author: string;
-  downloads: number;
-  rating: number;
-  repository: string;
-}
+### 下一步
 
-class PluginMarketplace {
-  private apiUrl = 'https://clawhub.com/api/plugins';
-  
-  // 搜索插件
-  async search(query: string): Promise<MarketplacePlugin[]> {
-    const response = await fetch(
-      `${this.apiUrl}/search?q=${encodeURIComponent(query)}`
-    );
-    
-    return await response.json();
-  }
-  
-  // 安装插件
-  async install(pluginName: string): Promise<void> {
-    // 获取插件信息
-    const info = await this.getPluginInfo(pluginName);
-    
-    // 下载插件
-    const downloadUrl = `${this.apiUrl}/download/${pluginName}`;
-    const response = await fetch(downloadUrl);
-    const buffer = await response.arrayBuffer();
-    
-    // 解压到插件目录
-    const pluginDir = join(this.pluginsDir, pluginName);
-    await this.extractZip(Buffer.from(buffer), pluginDir);
-    
-    // 加载插件
-    await this.loader.loadPlugin(pluginName);
-    
-    console.log(`Plugin installed: ${pluginName}`);
-  }
-  
-  // 更新插件
-  async update(pluginName: string): Promise<void> {
-    // 先卸载
-    await this.loader.unloadPlugin(pluginName);
-    
-    // 重新安装
-    await this.install(pluginName);
-    
-    console.log(`Plugin updated: ${pluginName}`);
-  }
-  
-  // 列出已安装插件的更新
-  async checkUpdates(): Promise<Array<{ name: string; current: string; latest: string }>> {
-    const updates = [];
-    
-    for (const [name, plugin] of this.loader.getPlugins()) {
-      const info = await this.getPluginInfo(name);
-      
-      if (info.version !== plugin.config.version) {
-        updates.push({
-          name,
-          current: plugin.config.version,
-          latest: info.version,
-        });
-      }
-    }
-    
-    return updates;
-  }
-}
-```
+在下一章，我们将学习 **多节点部署**：
+- 如何部署多个 OpenClaw 实例
+- 负载均衡和故障转移
+- 分布式架构
 
 ---
 
-## 本章小结
+## 参考资源
 
-通过本章的学习，你应该掌握了：
-
-1. **插件架构** - 什么是插件、目录结构、配置文件
-2. **钩子机制** - 钩子类型、实现方式、消息处理
-3. **开发插件** - 开发流程、完整示例、数据库和 API 扩展
-4. **插件管理** - 加载器、配置管理、插件市场
-
----
-
-*下一章：第 18 章 多节点部署*
+- OpenClaw 插件开发文档
+- 插件市场
+- 示例插件代码
