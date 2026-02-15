@@ -6,23 +6,50 @@
 
 ## 2.1 安装 OpenClaw
 
-### 2.1.1 环境要求
+有两种方式安装 OpenClaw：
 
-- **Node.js** 18+ 
-- **npm** 或 **pnpm**
-- **Git**（可选，用于克隆示例）
+### 方式一：使用 npm 安装（推荐新手）
 
-### 2.1.2 安装 CLI
+这种方式最简单，适合快速体验：
 
 ```bash
+# 安装 CLI
 npm install -g @openclaw/cli
-```
 
-安装完成后，验证：
-
-```bash
+# 验证安装
 openclaw --version
 ```
+
+### 方式二：从 GitHub 源码安装（推荐开发者）
+
+如果你想查看源码、修改功能或贡献代码：
+
+```bash
+# 克隆仓库
+git clone https://github.com/openclaw/openclaw.git
+
+# 进入目录
+cd openclaw
+
+# 安装依赖
+npm install
+
+# 构建项目
+npm run build
+
+# 链接到全局（可选）
+npm link
+
+# 验证安装
+openclaw --version
+```
+
+**两种方式的区别**：
+
+| 方式 | 优点 | 缺点 | 适用人群 |
+|------|------|------|---------|
+| npm 安装 | 简单快速，自动更新 | 无法修改源码 | 新手、快速体验 |
+| 源码安装 | 可查看修改源码，参与开发 | 需要手动更新 | 开发者、深度定制 |
 
 ### 2.1.3 创建第一个项目
 
