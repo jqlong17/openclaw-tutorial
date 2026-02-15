@@ -1,912 +1,514 @@
 # 第 4 章：消息传输流程
 
-> 本章将深入解析 OpenClaw 中消息从接收到回复的完整传输流程，帮助你理解系统的核心工作机制。
+> 本章将深入解析 OpenClaw 的消息处理机制，帮助你理解从用户发消息到收到回复的完整过程。
 
 ---
 
-## 4.1 整体流程概览
+## 4.1 消息流转全景
 
-### 4.1.1 消息生命周期
+### 4.1.1 一个消息的生命周期
 
-一条消息在 OpenClaw 中的完整生命周期：
-
-```mermaid
-graph LR
-    A[用户发送消息] --> B[平台接收]
-    B --> C[标准化]
-    C --> D[预检查]
-    D --> E[构建上下文]
-    E --> F[AI处理]
-    F --> G[生成回复]
-    G --> H[格式化]
-    H --> I[平台发送]
-    I --> J[用户看到回复]
-```
-
-**各阶段耗时**（参考）：
-
-| 阶段 | 典型耗时 | 说明 |
-|------|----------|------|
-| 平台接收 | 50-200ms | WebSocket/Webhook 延迟 |
-| 标准化 | 10-50ms | 格式转换 |
-| 预检查 | 5-20ms | 白名单、权限检查 |
-| 构建上下文 | 20-100ms | 读取历史、记忆检索 |
-| AI处理 | 1-10s | 模型推理（主要耗时） |
-| 生成回复 | 10-50ms | 后处理 |
-| 平台发送 | 100-500ms | API 调用 |
-| **总计** | **1.2-12s** | 取决于模型和网络 |
-
-### 4.1.2 核心组件交互
-
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant Platform as 消息平台
-    participant Gateway as Gateway
-    participant Channel as Channel Adapter
-    participant AutoReply as Auto-Reply Core
-    participant Agent as Agent Runner
-    participant Memory as Memory System
-    participant LLM as LLM API
-
-    User->>Platform: 发送消息
-    Platform->>Gateway: WebSocket/Webhook
-    Gateway->>Channel: 路由
-    Channel->>Channel: 标准化
-    Channel->>Gateway: MsgContext
-    Gateway->>AutoReply: dispatch
-    
-    AutoReply->>AutoReply: Debounce
-    AutoReply->>AutoReply: Preflight
-    AutoReply->>Agent: 构建上下文
-    
-    Agent->>Memory: 检索记忆
-    Memory-->>Agent: 记忆片段
-    
-    Agent->>LLM: 请求
-    LLM-->>Agent: 响应
-    
-    Agent->>AutoReply: 回复内容
-    AutoReply->>Gateway: send
-    Gateway->>Channel: 格式化
-    Channel->>Platform: API调用
-    Platform->>User: 显示回复
-```
-
-### 4.1.3 数据转换过程
-
-消息在不同阶段的数据格式：
+想象用户在微信中发送了一条消息：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  阶段          │  数据格式                                    │
-├─────────────────────────────────────────────────────────────┤
-│  平台原始      │  Discord Message 对象                        │
-│                │  {id, content, author, channel_id, ...}      │
-├─────────────────────────────────────────────────────────────┤
-│  标准化        │  内部统一格式                                │
-│                │  {body, from, to, platform, ...}             │
-├─────────────────────────────────────────────────────────────┤
-│  上下文构建    │  MsgContext                                  │
-│                │  {Body, From, To, SessionKey, History, ...}  │
-├─────────────────────────────────────────────────────────────┤
-│  AI 输入       │  提示词组装                                  │
-│                │  System + History + User Message             │
-├─────────────────────────────────────────────────────────────┤
-│  AI 输出       │  原始回复                                    │
-│                │  文本或工具调用                              │
-├─────────────────────────────────────────────────────────────┤
-│  平台发送      │  平台特定格式                                │
-│                │  Discord: {content, embeds, ...}             │
-└─────────────────────────────────────────────────────────────┘
+用户在微信说："今天有什么安排？"
+        ↓
+【微信服务器】接收消息
+        ↓
+【OpenClaw Gateway】接收并解析
+        ↓
+【消息路由】决定交给哪个 Agent
+        ↓
+【Agent 处理】理解意图、查询日程、生成回复
+        ↓
+【Gateway】发送回复
+        ↓
+【微信服务器】推送给用户
+        ↓
+用户看到："今天有产品评审会（10:00）和技术分享会（14:00）"
 ```
+
+整个过程约 1-3 秒，用户感知就是"秒回"。
+
+### 4.1.2 核心组件
+
+消息传输涉及四个核心组件：
+
+| 组件 | 职责 | 类比 |
+|------|------|------|
+| **Channel Adapter** | 对接各平台协议 | 翻译官（把各平台消息翻译成标准格式） |
+| **Gateway** | 消息路由和分发 | 邮局（决定消息送往哪里） |
+| **Agent Runner** | 执行 AI 处理 | 大脑（思考并生成回复） |
+| **Message Queue** | 异步处理和解耦 | 缓冲带（削峰填谷） |
 
 ---
 
-## 4.2 消息流入 (Inbound)
+## 4.2 详细流程解析
 
-### 4.2.1 平台 WebSocket/Webhook 接收
+### 4.2.1 第一步：消息接入（Channel Adapter）
 
-不同平台的连接方式：
+不同平台的消息格式各不相同：
 
-| 平台 | 连接方式 | 特点 |
-|------|----------|------|
-| **Discord** | WebSocket (Gateway) | 实时、持久连接 |
-| **Telegram** | Long Polling / Webhook | 灵活、可切换 |
-| **Slack** | WebSocket (Socket Mode) | 企业友好 |
-| **WhatsApp** | Web 扫描 + WebSocket | 模拟用户行为 |
-| **Signal** | 本地监听 | 需要桌面客户端 |
-
-**Discord WebSocket 示例**：
-
-```typescript
-// /src/discord/monitor/provider.ts (简化)
-class DiscordGateway {
-  private ws: WebSocket;
-  
-  async connect() {
-    // 1. 获取 Gateway 地址
-    const { url } = await this.getGatewayUrl();
-    
-    // 2. 建立 WebSocket 连接
-    this.ws = new WebSocket(`${url}/?v=10`);
-    
-    // 3. 处理消息
-    this.ws.on('message', (data) => {
-      const payload = JSON.parse(data);
-      this.handlePayload(payload);
-    });
-  }
-  
-  handlePayload(payload: GatewayPayload) {
-    switch (payload.t) {
-      case 'MESSAGE_CREATE':
-        // 触发消息处理器
-        this.emit('message', payload.d);
-        break;
-      // ... 其他事件
-    }
-  }
+**Discord 消息格式**：
+```json
+{
+  "id": "123456789",
+  "author": {"username": "张三"},
+  "content": "今天有什么安排？",
+  "channel_id": "987654321",
+  "timestamp": "2024-02-15T10:30:00.000Z"
 }
 ```
 
-### 4.2.2 消息标准化
-
-将平台特定格式转为内部统一格式：
-
-```typescript
-// /src/discord/monitor/message-utils.ts (简化)
-function normalizeDiscordMessage(message: DiscordMessage): StandardMessage {
-  return {
-    // 基础信息
-    id: message.id,
-    content: message.content,
-    
-    // 发送者
-    from: {
-      id: message.author.id,
-      name: message.author.username,
-      displayName: message.author.global_name,
-    },
-    
-    // 目标
-    to: {
-      channelId: message.channel_id,
-      guildId: message.guild_id,
-    },
-    
-    // 平台标识
-    platform: 'discord',
-    
-    // 消息类型
-    type: message.guild_id ? 'guild' : 'dm',
-    
-    // 引用
-    replyTo: message.referenced_message?.id,
-    
-    // 媒体
-    attachments: message.attachments.map(att => ({
-      url: att.url,
-      type: att.content_type,
-      size: att.size,
-    })),
-    
-    // 时间戳
-    timestamp: message.timestamp,
-  };
+**Telegram 消息格式**：
+```json
+{
+  "message_id": 123,
+  "from": {"first_name": "张三"},
+  "text": "今天有什么安排？",
+  "chat": {"id": 987654321},
+  "date": 1707991800
 }
 ```
 
-### 4.2.3 入站消抖 (Debouncer)
-
-**为什么需要消抖？**
-
-用户可能快速发送多条消息，我们希望合并处理：
-
-```
-用户输入：
-[10:00:00] "你好"
-[10:00:01] "在吗"
-[10:00:02] "有个问题"
-
-不消抖：触发 3 次 AI 调用
-消抖后：合并为 "你好\n在吗\n有个问题"，触发 1 次 AI 调用
-```
-
-**实现原理**：
-
-```typescript
-// /src/auto-reply/inbound-debounce.ts (简化)
-class InboundDebouncer {
-  private pending = new Map<string, PendingEntry[]>();
-  private timers = new Map<string, NodeJS.Timeout>();
-  
-  constructor(private options: {
-    debounceMs: number;  // 默认 300ms
-    onFlush: (entries: PendingEntry[]) => void;
-  }) {}
-  
-  async enqueue(entry: PendingEntry) {
-    const key = this.buildKey(entry);
-    
-    // 添加到待处理队列
-    if (!this.pending.has(key)) {
-      this.pending.set(key, []);
-    }
-    this.pending.get(key)!.push(entry);
-    
-    // 重置定时器
-    this.resetTimer(key);
-  }
-  
-  private resetTimer(key: string) {
-    // 清除旧定时器
-    if (this.timers.has(key)) {
-      clearTimeout(this.timers.get(key)!);
-    }
-    
-    // 设置新定时器
-    const timer = setTimeout(() => {
-      this.flush(key);
-    }, this.options.debounceMs);
-    
-    this.timers.set(key, timer);
-  }
-  
-  private flush(key: string) {
-    const entries = this.pending.get(key);
-    if (!entries || entries.length === 0) return;
-    
-    // 清空队列
-    this.pending.delete(key);
-    this.timers.delete(key);
-    
-    // 触发回调
-    this.options.onFlush(entries);
-  }
-  
-  private buildKey(entry: PendingEntry): string {
-    // 按平台+频道+用户分组
-    return `${entry.platform}:${entry.channelId}:${entry.userId}`;
-  }
+**飞书消息格式**：
+```json
+{
+  "message_id": "om_123456",
+  "sender": {"sender_id": {"open_id": "ou_abc"}},
+  "content": {"text": "今天有什么安排？"}
 }
 ```
 
-**消抖策略**：
+**Channel Adapter 的作用**：
 
-| 情况 | 处理 |
-|------|------|
-| 单条消息 | 正常处理 |
-| 多条文本 | 合并为一条，用换行分隔 |
-| 含附件 | 不合并，立即处理 |
-| 控制命令 | 不合并，立即处理 |
-| 超过最大等待时间 | 强制刷新 |
+把这些五花八门的格式，统一转换成 OpenClaw 标准格式：
 
-### 4.2.4 预检查 (Preflight)
-
-在正式处理前进行一系列检查：
-
-```mermaid
-flowchart TD
-    A[消息到达] --> B{白名单检查}
-    B -->|拒绝| C[丢弃消息]
-    B -->|通过| D{是否需要@提及}
-    D -->|是且未提及| C
-    D -->|否或通过| E{命令检测}
-    E -->|控制命令| F[命令处理]
-    E -->|普通消息| G{频率限制}
-    G -->|超限| H[限流提示]
-    G -->|通过| I[继续处理]
-```
-
-**具体检查项**：
-
-```typescript
-// /src/discord/monitor/message-handler.preflight.ts (简化)
-interface PreflightCheck {
-  name: string;
-  check: (ctx: Context) => boolean | Promise<boolean>;
-  onFail?: (ctx: Context) => void;
-}
-
-const preflightChecks: PreflightCheck[] = [
-  {
-    name: 'allowlist',
-    check: (ctx) => {
-      // 检查用户/频道是否在白名单
-      return isInAllowlist(ctx.userId, ctx.channelId);
-    },
-    onFail: () => logger.debug('User not in allowlist'),
+```json
+{
+  "id": "msg_xxx",
+  "platform": "discord",  // 或 telegram、lark
+  "user": {
+    "id": "user_xxx",
+    "name": "张三"
   },
-  {
-    name: 'mention',
-    check: (ctx) => {
-      // 群组中是否需要@提及
-      if (ctx.isDM) return true;
-      if (!ctx.requireMention) return true;
-      return ctx.wasMentioned;
-    },
-    onFail: () => logger.debug('Mention required but not found'),
-  },
-  {
-    name: 'rateLimit',
-    check: (ctx) => {
-      // 检查频率限制
-      return rateLimiter.check(ctx.userId);
-    },
-    onFail: (ctx) => {
-      ctx.send('发送太频繁了，请稍后再试');
-    },
-  },
-  {
-    name: 'duplicate',
-    check: (ctx) => {
-      // 检查重复消息
-      return !isDuplicate(ctx.messageId);
-    },
-  },
-];
+  "content": "今天有什么安排？",
+  "channel": "channel_xxx",
+  "timestamp": 1707991800000
+}
+```
+
+这样上层处理逻辑只需要处理一种格式，不用关心用户从哪个平台来。
+
+### 4.2.2 第二步：消息路由（Gateway）
+
+消息进入 Gateway 后，需要决定：
+
+1. **哪个 Agent 处理？**
+   - 根据用户身份
+   - 根据消息内容
+   - 根据渠道配置
+
+2. **是否需要排队？**
+   - 系统负载高时放入队列
+   - 保证系统稳定性
+
+3. **是否需要过滤？**
+   - 垃圾消息拦截
+   - 敏感内容检测
+
+**路由决策示例**：
+
+```
+消息到达 Gateway
+    ↓
+检查用户身份
+    ↓
+用户 A → VIP Agent（优先处理）
+用户 B → 普通 Agent
+    ↓
+检查消息内容
+    ↓
+包含敏感词 → 拦截并记录
+正常消息 → 继续处理
+    ↓
+检查系统负载
+    ↓
+负载正常 → 直接处理
+负载较高 → 放入队列等待
+```
+
+### 4.2.3 第三步：Agent 处理（Agent Runner）
+
+这是核心处理环节，Agent Runner 负责：
+
+**1. 加载上下文**
+```
+获取用户历史对话（短期记忆）
+获取用户偏好设置（长期记忆）
+获取相关知识库（向量检索）
+```
+
+**2. 调用 AI 模型**
+```
+组装提示词（系统提示 + 上下文 + 用户消息）
+发送给 LLM
+等待模型返回
+```
+
+**3. 处理工具调用**
+```
+如果模型需要调用工具：
+  - 解析工具名称和参数
+  - 执行工具
+  - 获取结果
+  - 再次发给模型生成回复
+```
+
+**4. 生成回复**
+```
+模型生成最终回复文本
+可能包含：文字、图片、按钮等
+```
+
+**处理时序图**：
+
+```
+Agent Runner          LLM           工具
+    |                  |             |
+    |---- 发送消息 ---->|             |
+    |                  |             |
+    |<--- 需要调用工具 -|             |
+    |                  |             |
+    |---------------- 调用工具 ----->|
+    |                  |             |
+    |<----------------- 返回结果 -----|
+    |                  |             |
+    |---- 工具结果 ---->|             |
+    |                  |             |
+    |<--- 生成回复 -----|             |
+    |                  |             |
+```
+
+### 4.2.4 第四步：消息发送（Channel Adapter）
+
+处理完成后，需要把回复发回给用户：
+
+**转换回复格式**：
+
+OpenClaw 标准回复：
+```json
+{
+  "content": "今天有产品评审会（10:00）",
+  "type": "text"
+}
+```
+
+转换为 Discord 格式：
+```json
+{
+  "content": "今天有产品评审会（10:00）"
+}
+```
+
+转换为飞书格式：
+```json
+{
+  "msg_type": "text",
+  "content": {
+    "text": "今天有产品评审会（10:00）"
+  }
+}
+```
+
+**发送流程**：
+
+```
+Agent 生成回复
+    ↓
+Gateway 接收回复
+    ↓
+确定目标平台（Discord/飞书/...）
+    ↓
+转换为目标平台格式
+    ↓
+调用平台 API 发送
+    ↓
+用户收到回复
 ```
 
 ---
 
-## 4.3 消息处理 (Processing)
+## 4.3 关键技术点
 
-### 4.3.1 上下文构建
+### 4.3.1 异步处理
 
-构建完整的对话上下文是消息处理的核心：
+为什么需要异步？
 
-```typescript
-// /src/auto-reply/templating.ts (简化)
-interface MsgContext {
-  // 消息内容
-  Body: string;                    // 完整消息体（含信封格式）
-  BodyForAgent: string;            // 给 AI 的纯净内容
-  RawBody: string;                 // 原始消息内容
-  CommandBody?: string;            // 命令部分（如果有）
-  
-  // 路由信息
-  From: string;                    // 发送者标识
-  To: string;                      // 接收者标识
-  SessionKey: string;              // 会话唯一键
-  AccountId: string;               // 账号 ID
-  
-  // 会话信息
-  ChatType: 'direct' | 'channel';  // 聊天类型
-  ConversationLabel: string;       // 会话标签
-  
-  // 群组信息
-  GroupSubject?: string;           // 群组主题
-  GroupChannel?: string;           // 群组频道
-  GroupSpace?: string;             // 群组空间
-  
-  // 发送者信息
-  SenderName: string;              // 发送者名称
-  SenderId: string;                // 发送者 ID
-  SenderUsername: string;          // 用户名
-  SenderTag?: string;              // 标签（如 Discord discriminator）
-  
-  // 回复上下文
-  ReplyToId?: string;              // 回复的消息 ID
-  ReplyToBody?: string;            // 回复的消息内容
-  ReplyToSender?: string;          // 回复的消息发送者
-  
-  // 线程信息
-  ThreadStarterBody?: string;      // 线程起始消息
-  ThreadLabel?: string;            // 线程标签
-  ParentSessionKey?: string;       // 父会话键
-  
-  // 媒体
-  MediaUrl?: string;               // 媒体 URL
-  MediaContentType?: string;       // 媒体类型
-  MediaCaption?: string;           // 媒体说明
-  
-  // 元数据
-  Provider: string;                // 提供商（discord/telegram/...）
-  Surface: string;                 // 表面（同 Provider）
-  WasMentioned: boolean;           // 是否被@提及
-  Timestamp: number;               // 时间戳
-  
-  // 命令相关
-  CommandAuthorized?: boolean;     // 命令是否授权
-  CommandSource?: 'text' | 'native'; // 命令来源
-  
-  // 其他
-  UntrustedContext?: unknown[];    // 不可信上下文
-  GroupSystemPrompt?: string;      // 群组系统提示词
-  OwnerAllowFrom?: string[];       // 允许的发送者
-}
+**场景**：1000 个用户同时发消息
+
+**同步处理**：
+```
+用户1消息 → 处理（3秒）→ 回复
+用户2消息 → 等待用户1完成 → 处理（3秒）→ 回复
+...
+用户1000 → 等待前面999个 → 处理（3秒）→ 回复
+
+总时间：3000秒（50分钟）
+用户：这机器人卡死了？
 ```
 
-**构建流程**：
+**异步处理**：
+```
+所有消息 → 放入队列 → 立即返回"处理中"
+多个 Worker 并行处理
+    ↓
+用户1：3秒后收到回复
+用户2：3秒后收到回复
+...
+用户1000：3秒后收到回复
 
-```mermaid
-sequenceDiagram
-    participant Handler as Message Handler
-    participant Builder as Context Builder
-    participant History as History Manager
-    participant Memory as Memory System
-    participant Envelope as Envelope Formatter
-
-    Handler->>Builder: 原始消息
-    Builder->>Builder: 解析基础信息
-    Builder->>Builder: 构建 SessionKey
-    
-    alt 群组消息
-        Builder->>History: 获取历史记录
-        History-->>Builder: 返回历史条目
-    end
-    
-    Builder->>Memory: 检索相关记忆
-    Memory-->>Builder: 返回记忆片段
-    
-    Builder->>Envelope: 格式化信封
-    Envelope-->>Builder: 返回格式化消息
-    
-    Builder->>Builder: 组装完整上下文
-    Builder-->>Handler: MsgContext
+总时间：3秒
+用户：响应好快！
 ```
 
-### 4.3.2 会话标签生成
-
-会话标签用于标识和区分不同对话：
-
-```typescript
-// /src/channels/conversation-label.ts
-function resolveConversationLabel(ctx: MsgContext): string {
-  // 1. 检查显式标签
-  if (ctx.ConversationLabel) {
-    return ctx.ConversationLabel;
-  }
-  
-  // 2. 检查线程标签
-  if (ctx.ThreadLabel) {
-    return ctx.ThreadLabel;
-  }
-  
-  // 3. 根据聊天类型构建
-  if (ctx.ChatType === 'direct') {
-    // 私聊: "用户名 user id:123456"
-    return `${ctx.SenderName} user id:${ctx.SenderId}`;
-  }
-  
-  // 群组: "Guild名 #频道 channel id:789"
-  const base = ctx.GroupChannel || ctx.GroupSubject || 'Group';
-  return `${base} channel id:${ctx.To.split(':').pop()}`;
-}
-```
-
-**标签示例**：
-
-| 场景 | 标签格式 | 示例 |
-|------|----------|------|
-| Discord 私聊 | `{用户名} user id:{ID}` | `jq1117 user id:1094076488640376883` |
-| Discord 频道 | `{Guild} #{频道} channel id:{ID}` | `MyServer #general channel id:1470398904750178481` |
-| Telegram 私聊 | `{用户名} user id:{ID}` | `john_doe user id:123456789` |
-| Telegram 群组 | `{群组名} group id:{ID}` | `TechChat group id:-987654321` |
-
-### 4.3.3 系统提示词组装
-
-将各种配置组合成完整的系统提示词：
+**OpenClaw 的异步机制**：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    系统提示词结构                            │
-├─────────────────────────────────────────────────────────────┤
-│  1. 基础身份                                                │
-│     "你是 OpenClaw 的一个实例..."                           │
-├─────────────────────────────────────────────────────────────┤
-│  2. SOUL.md 内容                                            │
-│     [核心价值观、行为准则、个性]                             │
-├─────────────────────────────────────────────────────────────┤
-│  3. IDENTITY.md 内容                                        │
-│     [名字、形象、Emoji]                                     │
-├─────────────────────────────────────────────────────────────┤
-│  4. 当前上下文                                              │
-│     - 会话标签                                              │
-│     - 聊天类型                                              │
-│     - 群组信息（如果是群组）                                 │
-├─────────────────────────────────────────────────────────────┤
-│  5. 可用工具列表                                            │
-│     [工具名称、描述、参数]                                   │
-├─────────────────────────────────────────────────────────────┤
-│  6. 相关记忆（RAG 检索结果）                                 │
-│     [记忆片段 1]                                            │
-│     [记忆片段 2]                                            │
-├─────────────────────────────────────────────────────────────┤
-│  7. 历史对话（最近 N 条）                                    │
-│     User: ...                                               │
-│     Assistant: ...                                          │
-├─────────────────────────────────────────────────────────────┤
-│  8. 当前消息                                                │
-│     [信封格式]                                              │
-│     From: ...                                               │
-│     Body: ...                                               │
-└─────────────────────────────────────────────────────────────┘
+消息到达
+    ↓
+放入 Message Queue（Redis/RabbitMQ）
+    ↓
+多个 Agent Worker 并行消费
+    ↓
+处理完成后回调 Gateway 发送回复
 ```
 
-**代码示例**：
+### 4.3.2 上下文保持
 
-```typescript
-// /src/agents/pi-embedded-runner/run/params.ts (简化)
-function buildSystemPrompt(ctx: MsgContext): string {
-  const parts: string[] = [];
-  
-  // 1. 基础身份
-  parts.push(`You are ${ctx.AgentName}, an AI assistant.`);
-  
-  // 2. SOUL.md
-  parts.push(readFile('SOUL.md'));
-  
-  // 3. IDENTITY.md
-  parts.push(readFile('IDENTITY.md'));
-  
-  // 4. 当前上下文
-  parts.push(`Current conversation: ${ctx.ConversationLabel}`);
-  parts.push(`Chat type: ${ctx.ChatType}`);
-  
-  if (ctx.ChatType === 'channel') {
-    parts.push(`Group: ${ctx.GroupSubject || 'Unknown'}`);
-  }
-  
-  // 5. 可用工具
-  if (ctx.AvailableTools.length > 0) {
-    parts.push('Available tools:');
-    for (const tool of ctx.AvailableTools) {
-      parts.push(`- ${tool.name}: ${tool.description}`);
-    }
-  }
-  
-  // 6. 相关记忆
-  if (ctx.RelevantMemories.length > 0) {
-    parts.push('Relevant memories:');
-    for (const memory of ctx.RelevantMemories) {
-      parts.push(`- ${memory.snippet}`);
-    }
-  }
-  
-  // 7. 历史对话
-  if (ctx.History.length > 0) {
-    parts.push('Recent conversation:');
-    for (const entry of ctx.History) {
-      parts.push(`${entry.role}: ${entry.content}`);
-    }
-  }
-  
-  return parts.join('\n\n');
-}
+多轮对话如何保持连贯？
+
+**问题场景**：
+```
+用户：明天北京天气怎么样？
+Agent：明天北京晴，25°C。
+
+用户：那上海呢？
+Agent：（不知道用户问的是天气）
+      上海是中国的一个城市...
 ```
 
-### 4.3.4 AI 模型调用
+**解决方案 - 对话上下文**：
 
-调用 AI 模型进行推理：
+```
+每次对话都带上历史记录：
 
-```typescript
-// /src/agents/pi-embedded-runner/run/params.ts (简化)
-async function callAI(params: {
-  systemPrompt: string;
-  messages: Message[];
-  tools?: Tool[];
-  model: string;
-}): Promise<AIResponse> {
-  const client = createClient(params.model);
-  
-  const response = await client.chat.completions.create({
-    model: params.model,
-    messages: [
-      { role: 'system', content: params.systemPrompt },
-      ...params.messages,
-    ],
-    tools: params.tools,
-    tool_choice: params.tools ? 'auto' : undefined,
-    temperature: 0.7,
-    max_tokens: 2000,
-  });
-  
-  return {
-    content: response.choices[0].message.content,
-    toolCalls: response.choices[0].message.tool_calls,
-  };
-}
+系统：你是天气助手
+用户：明天北京天气怎么样？
+助手：明天北京晴，25°C。
+用户：那上海呢？  ← 这里隐含"天气"
+助手：明天上海多云，22°C。
+```
+
+**OpenClaw 的实现**：
+
+```yaml
+# 短期记忆（对话上下文）
+context:
+  max_messages: 10  # 记住最近10轮对话
+  ttl: 3600         # 1小时后过期
+```
+
+### 4.3.3 错误处理
+
+消息处理中可能遇到各种问题：
+
+| 问题 | 原因 | 处理策略 |
+|------|------|---------|
+| **API 超时** | LLM 响应慢 | 重试3次，超时后提示用户 |
+| **模型错误** | LLM 服务异常 | 切换到备用模型 |
+| **工具失败** | 外部服务异常 | 记录日志，告知用户 |
+| **消息丢失** | 网络问题 | 消息队列持久化，确保不丢 |
+
+**错误处理流程**：
+
+```
+处理消息
+    ↓
+成功 → 发送回复
+    ↓
+失败 → 记录错误日志
+    ↓
+  重试？→ 是 → 重新处理
+    ↓  否
+  告知用户："服务暂时异常，请稍后重试"
 ```
 
 ---
 
-## 4.4 消息流出 (Outbound)
+## 4.4 性能优化
 
-### 4.4.1 回复生成
+### 4.4.1 缓存策略
 
-AI 生成的回复可能需要后处理：
+**缓存什么？**
 
-```typescript
-// /src/auto-reply/reply/dispatch-from-config.ts (简化)
-function processAIResponse(response: AIResponse): ProcessedReply {
-  let content = response.content;
-  
-  // 1. 清理思考过程（如果有）
-  content = removeThinkingTags(content);
-  
-  // 2. 处理工具调用
-  if (response.toolCalls) {
-    return {
-      type: 'tool_calls',
-      toolCalls: response.toolCalls,
-    };
-  }
-  
-  // 3. 提取回复标签
-  const replyTag = extractReplyTag(content);
-  if (replyTag) {
-    content = removeReplyTag(content);
-  }
-  
-  // 4. 处理特殊标记
-  content = processSpecialMarkers(content);
-  
-  // 5. 平台特定处理
-  content = platformSpecificProcessing(content);
-  
-  return {
-    type: 'text',
-    content,
-    replyTag,
-  };
-}
+| 数据 | 缓存时长 | 效果 |
+|------|---------|------|
+| 用户资料 | 1小时 | 减少数据库查询 |
+| 知识库向量 | 24小时 | 加速检索 |
+| 常用回复 | 1小时 | 直接返回，不走 LLM |
+
+**示例**：
+
+```
+用户：OpenClaw 是什么？
+
+第一次：查询知识库 → LLM 生成 → 缓存回复
+第二次：直接返回缓存（快10倍）
 ```
 
-### 4.4.2 消息分块
+### 4.4.2 批量处理
 
-当回复超过平台限制时，需要分块发送：
+**场景**：1000 个用户问相同问题
 
-```typescript
-// /src/auto-reply/chunk.ts (简化)
-function chunkMessage(
-  content: string,
-  options: {
-    maxLength: number;      // 平台限制（如 Discord 2000）
-    mode: 'paragraph' | 'line' | 'code';
-  }
-): string[] {
-  const chunks: string[] = [];
-  
-  if (content.length <= options.maxLength) {
-    return [content];
-  }
-  
-  switch (options.mode) {
-    case 'paragraph':
-      // 按段落分割，保持段落完整
-      const paragraphs = content.split('\n\n');
-      let currentChunk = '';
-      
-      for (const para of paragraphs) {
-        if ((currentChunk + para).length > options.maxLength) {
-          if (currentChunk) chunks.push(currentChunk.trim());
-          currentChunk = para;
-        } else {
-          currentChunk += '\n\n' + para;
-        }
-      }
-      
-      if (currentChunk) chunks.push(currentChunk.trim());
-      break;
-      
-    case 'line':
-      // 按行分割
-      const lines = content.split('\n');
-      let currentLines: string[] = [];
-      
-      for (const line of lines) {
-        const testChunk = currentLines.join('\n') + '\n' + line;
-        if (testChunk.length > options.maxLength) {
-          chunks.push(currentLines.join('\n'));
-          currentLines = [line];
-        } else {
-          currentLines.push(line);
-        }
-      }
-      
-      if (currentLines.length > 0) {
-        chunks.push(currentLines.join('\n'));
-      }
-      break;
-      
-    case 'code':
-      // 保护代码块完整性
-      chunks.push(...chunkWithCodeBlocks(content, options.maxLength));
-      break;
-  }
-  
-  return chunks;
-}
+**优化前**：
+```
+每个请求单独调用 LLM
+1000 次 API 调用
+费用：1000 × ¥0.01 = ¥10
 ```
 
-**各平台消息限制**：
-
-| 平台 | 文本限制 | 处理方式 |
-|------|----------|----------|
-| Discord | 2000 字符 | 分块发送 |
-| Telegram | 4096 字符 | 分块发送 |
-| Slack | 4000 字符 | 分块或使用附件 |
-| WhatsApp | 4096 字符 | 分块发送 |
-
-### 4.4.3 平台 API 发送
-
-将格式化后的消息发送到平台：
-
-```typescript
-// /src/discord/send.outbound.ts (简化)
-async function sendDiscordMessage(params: {
-  channelId: string;
-  content: string;
-  replyToId?: string;
-  token: string;
-}): Promise<void> {
-  const url = `https://discord.com/api/v10/channels/${params.channelId}/messages`;
-  
-  const body: DiscordMessageBody = {
-    content: params.content,
-  };
-  
-  if (params.replyToId) {
-    body.message_reference = {
-      message_id: params.replyToId,
-    };
-  }
-  
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bot ${params.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Discord API error: ${response.status}`);
-  }
-}
+**优化后**：
+```
+识别相同问题
+批量调用 LLM
+合并相似请求
+费用：100 × ¥0.01 = ¥1（省90%）
 ```
 
-### 4.4.4 发送确认与错误处理
+### 4.4.3 连接池
 
-```typescript
-// 发送流程
-async function deliverReply(params: DeliverParams): Promise<Result> {
-  try {
-    // 1. 发送消息
-    const messageId = await sendMessage(params);
-    
-    // 2. 记录发送历史
-    await recordOutboundHistory({
-      messageId,
-      content: params.content,
-      timestamp: Date.now(),
-    });
-    
-    // 3. 更新打字状态
-    await stopTyping(params.channelId);
-    
-    return { success: true, messageId };
-    
-  } catch (error) {
-    // 错误处理
-    logger.error('Failed to send message:', error);
-    
-    // 重试策略
-    if (isRetryableError(error) && params.retryCount < 3) {
-      await delay(1000 * Math.pow(2, params.retryCount));
-      return deliverReply({
-        ...params,
-        retryCount: params.retryCount + 1,
-      });
-    }
-    
-    // 通知用户
-    await sendErrorNotification(params.channelId);
-    
-    return { success: false, error };
-  }
-}
+**问题**：每个消息都新建连接？
+
+```
+消息1 → 新建连接 → 发送 → 关闭连接
+消息2 → 新建连接 → 发送 → 关闭连接
+...
+
+耗时：每次 50-100ms
+```
+
+**优化**：连接池复用
+
+```
+预先建立 10 个连接
+消息1 → 使用连接1 → 归还
+消息2 → 使用连接2 → 归还
+...
+
+耗时：每次 5-10ms（快10倍）
 ```
 
 ---
 
-## 4.5 源码深度解析
+## 4.5 监控与调试
 
-### 4.5.1 关键文件索引
+### 4.5.1 关键指标
 
-| 功能 | 文件路径 |
-|------|----------|
-| 消息分发入口 | `/src/auto-reply/dispatch.ts` |
-| 回复分发 | `/src/auto-reply/reply/dispatch-from-config.ts` |
-| 回复调度器 | `/src/auto-reply/reply/reply-dispatcher.ts` |
-| 入站消抖 | `/src/auto-reply/inbound-debounce.ts` |
-| 消息模板 | `/src/auto-reply/templating.ts` |
-| 信封格式 | `/src/auto-reply/envelope.ts` |
-| 消息分块 | `/src/auto-reply/chunk.ts` |
-| 会话标签 | `/src/channels/conversation-label.ts` |
-| 历史记录 | `/src/auto-reply/reply/history.ts` |
-| Discord 发送 | `/src/discord/send.outbound.ts` |
-| Discord 处理 | `/src/discord/monitor/message-handler.process.ts` |
+监控消息传输的健康状况：
 
-### 4.5.2 调试技巧
+| 指标 | 说明 | 健康范围 |
+|------|------|---------|
+| **QPS** | 每秒处理消息数 | > 100 |
+| **延迟** | 从接收到回复的时间 | < 3秒 |
+| **错误率** | 处理失败的比例 | < 1% |
+| **队列深度** | 等待处理的消息数 | < 1000 |
 
-**查看消息流转**：
+### 4.5.2 链路追踪
+
+一条消息经过了哪些环节？
+
+```
+消息ID: msg_abc123
+
+[10:30:00.000] 到达 Gateway
+[10:30:00.050] 进入队列
+[10:30:00.100] Agent 开始处理
+[10:30:01.500] 调用 LLM
+[10:30:02.800] LLM 返回
+[10:30:02.900] 生成回复
+[10:30:03.000] 发送给用户
+
+总耗时: 3秒
+瓶颈: LLM 调用 (1.3秒)
+```
+
+### 4.5.3 调试技巧
+
+**查看实时日志**：
 
 ```bash
-# 启用详细日志
-DEBUG=openclaw:auto-reply openclaw gateway run
+# 查看 Gateway 日志
+openclaw logs gateway
 
-# 查看特定模块
-DEBUG=openclaw:discord:* openclaw gateway run
+# 查看 Agent 处理日志
+openclaw logs agent
 
-# 查看提示词
-DEBUG=openclaw:prompt openclaw agent --message "test"
+# 查看特定消息的处理过程
+openclaw logs --message-id msg_abc123
 ```
 
-**添加自定义日志**：
+**模拟消息发送**：
 
-```typescript
-// 在关键位置添加日志
-import { logVerbose } from '../globals.js';
-
-logVerbose(`Processing message: ${messageId}`);
-logVerbose(`Context built: ${JSON.stringify(context)}`);
+```bash
+# 测试消息处理
+openclaw test send \
+  --platform terminal \
+  --user test_user \
+  --message "测试消息"
 ```
 
-### 4.5.3 性能优化建议
+---
 
-1. **减少上下文长度**
-   - 限制历史记录条数
-   - 优化记忆检索数量
-   - 精简系统提示词
+## 4.6 本章小结
 
-2. **缓存常用数据**
-   - 用户配置缓存
-   - 频道信息缓存
-   - 工具定义缓存
+### 核心流程
 
-3. **异步处理**
-   - 记忆检索异步化
-   - 日志记录异步化
-   - 指标上报异步化
+```
+用户发送消息
+    ↓
+Channel Adapter（格式转换）
+    ↓
+Gateway（路由决策）
+    ↓
+Message Queue（异步排队）
+    ↓
+Agent Runner（AI 处理）
+    ↓
+Channel Adapter（格式转换）
+    ↓
+用户收到回复
+```
+
+### 关键技术
+
+1. **格式统一** - Channel Adapter 屏蔽平台差异
+2. **异步处理** - Message Queue 保证高并发
+3. **上下文保持** - 短期记忆实现多轮对话
+4. **错误处理** - 重试、降级、告警机制
+5. **性能优化** - 缓存、批量、连接池
+
+### 下一步
+
+在下一章，我们将深入了解：
+- Gateway 的架构设计
+- 如何实现高可用和负载均衡
+- 多节点部署策略
 
 ---
 
-## 本章小结
+## 参考资源
 
-通过本章的学习，你应该深入理解了：
-
-1. **消息生命周期** - 从接收到回复的完整流程
-2. **消息流入** - WebSocket 接收、标准化、消抖、预检查
-3. **消息处理** - 上下文构建、会话标签、提示词组装、AI 调用
-4. **消息流出** - 回复生成、分块、平台发送、错误处理
-5. **源码结构** - 关键文件位置和调试技巧
-
-**核心要点**：
-- 消抖机制合并快速连续消息
-- 会话标签确保上下文隔离
-- 提示词组装决定 AI 行为
-- 分块策略处理长消息
-
-**下一步**：进入第 5 章，深入了解网关架构。
-
----
-
-## 练习与思考
-
-1. **流程追踪**：在源码中添加日志，追踪一条消息从接收到回复的完整路径。
-
-2. **消抖实验**：快速发送 3 条消息，观察它们是否被合并处理。
-
-3. **提示词分析**：使用 `--show-system-prompt` 查看实际发送给 AI 的提示词。
-
-4. **分块测试**：让 AI 生成一段超过 2000 字符的回复，观察分块效果。
-
-5. **性能测量**：测量各环节耗时，找出性能瓶颈。
-
----
-
-*下一章：第 5 章 网关架构*
+- 架构文档：https://docs.openclaw.ai/architecture
+- 性能优化指南：https://docs.openclaw.ai/performance
+- 监控配置：https://docs.openclaw.ai/monitoring
