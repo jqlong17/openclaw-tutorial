@@ -13,11 +13,11 @@ OpenClaw 支持多种即时通讯平台的深度集成。
 
 ## 章节导航
 
-- [第7章：Discord集成深度解析](/platform/chapter-07)
-- [第8章：Discord高级功能与最佳实践](/platform/chapter-08)
-- [第9章：Telegram集成深度解析](/platform/chapter-09)
-- [第10章：飞书集成深度解析](/platform/chapter-10)
-- [第11章：iMessage集成深度解析](/platform/chapter-11)
+- [第7章：Discord集成深度解析](/guide/chapter-07)
+- [第8章：Discord高级功能与最佳实践](/guide/chapter-08)
+- [第9章：Telegram集成深度解析](/guide/chapter-09)
+- [第10章：飞书集成深度解析](/guide/chapter-10)
+- [第11章：iMessage集成深度解析](/guide/chapter-11)
 
 ## 快速对比
 
