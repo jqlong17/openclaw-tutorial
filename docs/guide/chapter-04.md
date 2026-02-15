@@ -98,6 +98,14 @@
 }
 ```
 
+> **源码参考**：消息格式定义见 `src/types/message.ts`
+> 
+> **Discord 适配器**：`src/discord/adapter.ts`
+> 
+> **Telegram 适配器**：`src/telegram/adapter.ts`
+> 
+> **飞书适配器**：`src/lark/adapter.ts`
+
 这样上层处理逻辑只需要处理一种格式，不用关心用户从哪个平台来。
 
 ### 4.2.2 第二步：消息路由（Gateway）
@@ -137,6 +145,12 @@
 负载正常 → 直接处理
 负载较高 → 放入队列等待
 ```
+
+> **源码参考**：Gateway 实现见 `src/gateway/message-router.ts`
+> 
+> **路由配置**：`src/gateway/routing-config.ts`
+> 
+> **负载均衡**：`src/gateway/load-balancer.ts`
 
 ### 4.2.3 第三步：Agent 处理（Agent Runner）
 
@@ -190,6 +204,14 @@ Agent Runner          LLM           工具
     |                  |             |
 ```
 
+> **源码参考**：Agent Runner 实现见 `src/agents/pi-embedded-runner/run/`
+> 
+> **工具调用**：`src/agents/tools/tool-executor.ts`
+> 
+> **记忆系统**：`src/memory/manager.ts`
+> 
+> **提示词组装**：`src/agents/prompt-builder.ts`
+
 ### 4.2.4 第四步：消息发送（Channel Adapter）
 
 处理完成后，需要把回复发回给用户：
@@ -236,6 +258,14 @@ Gateway 接收回复
     ↓
 用户收到回复
 ```
+
+> **源码参考**：消息发送见 `src/gateway/outbound/message-sender.ts`
+> 
+> **格式转换**：`src/channels/message-formatter.ts`
+> 
+> **Discord 发送**：`src/discord/send.ts`
+> 
+> **飞书发送**：`src/lark/send.ts`
 
 ---
 
@@ -284,6 +314,14 @@ Gateway 接收回复
 处理完成后回调 Gateway 发送回复
 ```
 
+> **源码参考**：消息队列见 `src/queue/message-queue.ts`
+> 
+> **Redis 实现**：`src/queue/redis-queue.ts`
+> 
+> **Worker 实现**：`src/agents/worker/agent-worker.ts`
+> 
+> **任务调度**：`src/cron/service/scheduler.ts`
+
 ### 4.3.2 上下文保持
 
 多轮对话如何保持连贯？
@@ -318,6 +356,14 @@ context:
   max_messages: 10  # 记住最近10轮对话
   ttl: 3600         # 1小时后过期
 ```
+
+> **源码参考**：上下文管理见 `src/agents/context/conversation-context.ts`
+> 
+> **短期记忆**：`src/memory/short-term.ts`
+> 
+> **长期记忆**：`src/memory/long-term.ts`
+> 
+> **向量检索**：`src/memory/vector-search.ts`
 
 ### 4.3.3 错误处理
 
