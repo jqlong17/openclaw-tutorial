@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-docs",
+  "version": "1.0.0",
+  "description": "OpenClaw 完整学习教程",
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}
